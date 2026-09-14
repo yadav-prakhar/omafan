@@ -1,0 +1,264 @@
+#!/usr/bin/env bash
+# tests/fixtures/fake-afanctl - a hardware-free stand-in for the afanctl CLI.
+#
+# omafan's suites never touch the live fan daemon, so this script emulates the
+# slice of afanctl's surface that omafan uses: `status [--json]`, `hold <rpm>`,
+# `observe`/`curve`, and `--version`. It is deliberately loud about its safety
+# boundary: it refuses to run without a caller-provided runtime directory and
+# refuses to touch /run/afanctl, /sys, /etc or /usr.
+#
+# Environment switches
+#   AFANCTL_RUNTIME_DIR  runtime directory (--runtime-dir overrides it)
+#   FAKE_AFANCTL_MODE    observe (default) | hold | monitor-only | absent | error
+#   AFANCTL_FAKE_FAIL=1  every write (hold/observe/curve) exits 1
+#
+# FAKE_AFANCTL_MODE selects the daemon state `status` reports:
+#   observe       running, mode observe       (fixture status-observe.json)
+#   hold          running, mode hold          (fixture status-hold.json)
+#   monitor-only  running, monitor_only latch (status-hold.json, latch set)
+#   absent        no daemon (running:false)   (status-observe.json, state gone)
+#   error         every verb exits 1 with a runtime failure
+#
+# Writes append their effective argv to "$runtime_dir/argv.log" and write an
+# afanctl.cmd.v1 document to "$runtime_dir/cmd.json" (atomic tmp+rename), which
+# mirrors the real CLI and lets tests assert exactly what was requested.
+
+set -euo pipefail
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+readonly HW_MIN_RPM=1200
+readonly HW_MAX_RPM=7200
+readonly AFANCTL_VERSION="afanctl 0.1.0"
+
+runtime_dir="${AFANCTL_RUNTIME_DIR:-}"
+mode="${FAKE_AFANCTL_MODE:-observe}"
+
+usage() {
+    cat >&2 <<'EOF'
+afanctl 0.1.0 - applesmc fan supervisor (pre-T2 Intel Mac) [fake fixture]
+
+USAGE:  afanctl <verb> [options] [--runtime-dir DIR]
+
+VERBS:
+  status [--json]        report the simulated daemon/fan snapshot
+  hold <rpm>             request a held rpm (1200..7200; below min is rejected)
+  observe | curve        request firmware auto / the software curve
+  --version, -h          version / this help
+
+GLOBALS:
+  --runtime-dir <dir>    fixture runtime dir (or AFANCTL_RUNTIME_DIR)
+  --config <path>        accepted and ignored (the fixture has no config)
+  --sysfs-root <dir>     accepted and ignored (the fixture never touches sysfs)
+
+EXIT CODES: 0 success   1 runtime failure   2 usage/CLI error
+EOF
+}
+
+usage_error() {
+    printf 'afanctl: %s\n' "$1" >&2
+    usage
+    exit 2
+}
+
+runtime_error() {
+    printf '%s\n' "$1" >&2
+    exit 1
+}
+
+validate_mode() {
+    case "$mode" in
+        observe | hold | monitor-only | absent | error) ;;
+        *) usage_error "unknown FAKE_AFANCTL_MODE: $mode" ;;
+    esac
+}
+
+# Refuse to run without an explicit runtime dir, and never operate on the live
+# daemon's directory or any system path. Tests must pass a tempdir.
+require_runtime_dir() {
+    if [ -z "$runtime_dir" ]; then
+        usage_error "no runtime dir given (pass --runtime-dir DIR or set AFANCTL_RUNTIME_DIR; refusing to run)"
+    fi
+    # Strip a trailing slash so "/run/afanctl/" is caught too.
+    case "${runtime_dir%/}" in
+        /run/afanctl | /run/afanctl/*)
+            usage_error "refusing to touch the live daemon runtime dir ($runtime_dir)" ;;
+        /sys | /sys/* | /etc | /etc/* | /usr | /usr/* | /run | /run/* | / | "")
+            usage_error "refusing a system path as runtime dir ($runtime_dir)" ;;
+    esac
+}
+
+# Print an afanctl.status.v1 snapshot for the selected FAKE_AFANCTL_MODE. The
+# monitor-only and absent documents are derived with jq so the fixture set stays
+# small and every derived field stays consistent with its base fixture.
+status_json() {
+    case "$mode" in
+        observe)
+            cat -- "$script_dir/status-observe.json" ;;
+        hold)
+            cat -- "$script_dir/status-hold.json" ;;
+        monitor-only)
+            jq '.daemon.monitor_only = true
+                | .recent_errors = [{"ts":"2026-09-15T03:28:11+05:30",
+                    "msg":"write-back verification failed three times; degraded to AUTO + monitor-only (fix: systemctl restart afanctl)"}]' \
+                -- "$script_dir/status-hold.json" || runtime_error "afanctl: failed to render monitor-only status fixture" ;;
+        absent)
+            jq '.daemon.running = false
+                | .daemon.watchdog_armed = false
+                | .daemon.uptime_s = 0
+                | .fan.target_rpm = null
+                | .fan.manual = false
+                | .recent_errors = []' \
+                -- "$script_dir/status-observe.json" || runtime_error "afanctl: failed to render absent status fixture" ;;
+    esac
+}
+
+# Human status summary mirroring the real CLI's one-fact-per-line shape.
+status_human() {
+    status_json | jq -r '
+        "daemon: " + (if .daemon.running then "running" else "not running" end),
+        "mode: " + (.daemon.mode // "observe") + (if .daemon.monitor_only then " (monitor-only)" else "" end),
+        (if .daemon.auto_restore_pending then "auto_restore_pending: true (AUTO restore pending)" else empty end),
+        (.sensors[] | "sensor " + .label + ": " + (if .temp_c == null then "n/a" else ((.temp_c | tostring) + " C") end)),
+        "t_eff: " + (if .effective.temp_c == null then "n/a" else ((.effective.temp_c | tostring) + " C") end),
+        "fan: " + (.fan.rpm | tostring) + " rpm (" + (.fan.min_rpm | tostring) + ".." + (.fan.max_rpm | tostring) + ", manual=" + (.fan.manual | tostring) + ")",
+        "target: " + (if .fan.target_rpm == null then "n/a" else ((.fan.target_rpm | tostring) + " rpm") end),
+        "config: high=" + (.config.high_c | tostring) + " max=" + (.config.max_c | tostring) + " min_rpm=" + (.config.min_rpm | tostring) + " max_rpm=" + (.config.max_rpm | tostring) + " interval_s=" + (.config.interval_s | tostring) + " source=" + .config.source,
+        "recent_errors: " + (if (.recent_errors | length) == 0 then "none" else (.recent_errors | map(.msg) | join("; ")) end)'
+}
+
+cmd_status() {
+    local json=0 arg
+    for arg in "$@"; do
+        case "$arg" in
+            --json) json=1 ;;
+            *) usage_error "unknown flag for status: $arg" ;;
+        esac
+    done
+    if [ "$mode" = "error" ]; then
+        runtime_error "afanctl: sysfs read failed: /sys/devices/platform/applesmc.768/fan1_input: No such file or directory"
+    fi
+    if [ "$json" -eq 1 ]; then
+        status_json
+    else
+        status_human
+    fi
+}
+
+# Append the effective write argv so tests can assert what omafan asked for.
+log_argv() {
+    printf '%s\n' "$*" >>"$runtime_dir/argv.log"
+}
+
+# Write an afanctl.cmd.v1 document (atomic tmp+rename), exactly like the CLI.
+write_cmd() {
+    local wmode="$1" rpm="${2:-}" body tmp
+    if [ "${AFANCTL_FAKE_FAIL:-0}" = "1" ]; then
+        runtime_error "afanctl: $wmode write failed: $runtime_dir: Permission denied (simulated AFANCTL_FAKE_FAIL)"
+    fi
+    if [ "$mode" = "error" ]; then
+        runtime_error "afanctl: command channel unavailable: $runtime_dir (simulated FAKE_AFANCTL_MODE=error)"
+    fi
+    mkdir -p -- "$runtime_dir"
+    if [ -n "$rpm" ]; then
+        body="$(jq -cn --arg m "$wmode" --argjson r "$rpm" '{schema:"afanctl.cmd.v1",mode:$m,rpm:$r}')"
+    else
+        body="$(jq -cn --arg m "$wmode" '{schema:"afanctl.cmd.v1",mode:$m}')"
+    fi
+    tmp="$(mktemp -- "$runtime_dir/.cmd.json.XXXXXX")"
+    printf '%s' "$body" >"$tmp"
+    mv -f -- "$tmp" "$runtime_dir/cmd.json"
+}
+
+cmd_hold() {
+    if [ "$#" -ne 1 ]; then
+        usage_error "hold needs exactly one rpm argument"
+    fi
+    local rpm_arg="$1" rpm target
+    case "$rpm_arg" in
+        '' | *[!0-9]*)
+            usage_error "invalid rpm: $rpm_arg" ;;
+    esac
+    # 10# forces base 10, so a leading zero is never read as octal.
+    rpm=$((10#$rpm_arg))
+    if [ "$rpm" -lt "$HW_MIN_RPM" ]; then
+        runtime_error "invalid hold rpm: $rpm is below fan1_min $HW_MIN_RPM (fix: hold a value in $HW_MIN_RPM..=$HW_MAX_RPM rpm)"
+    fi
+    target="$rpm"
+    if [ "$rpm" -gt "$HW_MAX_RPM" ]; then
+        target="$HW_MAX_RPM"
+        printf 'afanctl: hold rpm %s clamped to fan1_max %s\n' "$rpm" "$HW_MAX_RPM" >&2
+    fi
+    write_cmd hold "$target"
+    log_argv "hold $target"
+}
+
+# observe/curve write their command with no rpm.
+cmd_mode_write() {
+    local requested="$1"
+    write_cmd "$requested"
+    log_argv "$requested"
+}
+
+# Parse order-insensitively: globals may appear before or after the verb,
+# matching how omafan-ctl itself accepts its flags. Non-flag tokens (the verb,
+# its arguments, and verb-level flags such as --json) are collected in order.
+positional=()
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --runtime-dir)
+            [ "$#" -ge 2 ] || usage_error "missing value for --runtime-dir"
+            runtime_dir="$2"
+            shift 2 ;;
+        --runtime-dir=*)
+            runtime_dir="${1#*=}"
+            shift ;;
+        --config)
+            [ "$#" -ge 2 ] || usage_error "missing value for --config"
+            shift 2 ;;
+        --config=*)
+            shift ;;
+        --sysfs-root)
+            [ "$#" -ge 2 ] || usage_error "missing value for --sysfs-root"
+            shift 2 ;;
+        --sysfs-root=*)
+            shift ;;
+        --version)
+            printf '%s\n' "$AFANCTL_VERSION"
+            exit 0 ;;
+        -h | --help)
+            usage
+            exit 0 ;;
+        --json)
+            positional+=("--json")
+            shift ;;
+        --* | -*)
+            usage_error "unknown flag \`$1'" ;;
+        *)
+            positional+=("$1")
+            shift ;;
+    esac
+done
+
+if [ "${#positional[@]}" -eq 0 ]; then
+    usage_error "no verb given"
+fi
+set -- "${positional[@]}"
+verb="$1"
+shift
+
+validate_mode
+
+case "$verb" in
+    status)
+        require_runtime_dir
+        cmd_status "$@" ;;
+    hold)
+        require_runtime_dir
+        cmd_hold "$@" ;;
+    observe | curve)
+        require_runtime_dir
+        cmd_mode_write "$verb" ;;
+    *)
+        usage_error "unknown verb \`$verb'" ;;
+esac

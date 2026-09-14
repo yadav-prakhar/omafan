@@ -1,0 +1,460 @@
+=== dispatch T02 model=opencode-go/deepseek-v4.1-flash variant=default at 2026-09-15T03:21:56+05:30
+[0m
+> Sisyphus - ultraworker · deepseek-v4.1-flash
+[0m
+[0m→ [0mRead PRD.md
+[0m→ [0mRead orchestration/instructions/WORKER.md
+I'll read the required files in parallel.
+[0m→ [0mRead DESIGN.md
+[0m→ [0mRead PLAN.md
+[0m→ [0mRead orchestration/tickets/T02.md
+[0m
+[0m$ [0mls -la && echo "--- model/tests ---" && ls -la Model.js tests 2>&1 | head -50
+total 112
+drwxr-xr-x 1 prakhar prakhar   198 Sep 15 03:16 .
+drwxr-xr-x 1 prakhar prakhar   100 Sep 15 02:46 ..
+drwxr-xr-x 1 prakhar prakhar     0 Sep 15 03:14 bin
+-rw-r--r-- 1 prakhar prakhar 22135 Sep 15 03:15 DESIGN.md
+-rw-r--r-- 1 prakhar prakhar   158 Sep 15 03:16 DEVIATIONS.md
+drwxr-xr-x 1 prakhar prakhar     0 Sep 15 03:14 docs
+drwxr-xr-x 1 prakhar prakhar   176 Sep 15 03:21 .git
+-rw-r--r-- 1 prakhar prakhar     8 Sep 15 03:21 .gitignore
+-rw-r--r-- 1 prakhar prakhar 35149 Sep 15 03:14 LICENSE
+drwxr-xr-x 1 prakhar prakhar    86 Sep 15 03:21 orchestration
+-rw-r--r-- 1 prakhar prakhar 23755 Sep 15 03:16 PLAN.md
+-rw-r--r-- 1 prakhar prakhar 16136 Sep 15 03:15 PRD.md
+-rw-r--r-- 1 prakhar prakhar   179 Sep 15 03:16 QUESTIONS.md
+drwxr-xr-x 1 prakhar prakhar    84 Sep 15 03:13 .recon
+drwxr-xr-x 1 prakhar prakhar    16 Sep 15 03:14 tests
+--- model/tests ---
+ls: cannot access 'Model.js': No such file or directory
+tests:
+total 0
+drwxr-xr-x 1 prakhar prakhar  16 Sep 15 03:14 .
+drwxr-xr-x 1 prakhar prakhar 198 Sep 15 03:16 ..
+drwxr-xr-x 1 prakhar prakhar   0 Sep 15 03:14 fixtures
+[0m
+Now let me check the current repo state.
+[0m$ [0mnode --version; echo "---"; cat /usr/share/omarchy/version 2>/dev/null; echo "--- git status (read-only) ---"
+v26.8.2
+---
+4.0.0.alpha
+--- git status (read-only) ---
+[0m
+[0m→ [0mRead QUESTIONS.md
+[0m→ [0mRead DEVIATIONS.md
+[0m
+[0m# [0mTodos
+[•] Model.js: implement all 17 DESIGN.md §5 pure functions ES5-safe - expect valid JS with no QML pragma
+[ ] tests/model.test.mjs: node:fs sandbox harness with >=40 table assertions incl. ticket's named cases - expect PASS n / FAIL 0
+[ ] Run gates: node tests/model.test.mjs; bash -n (bash files); grep hygiene - expect exit 0 and clean output
+[0m
+T02 owns `Model.js` + `tests/model.test.mjs`; neither exists yet. Note: DESIGN.md §5 lists **17** functions while the ticket says "19" — I'll implement §5 exactly and record the mismatch.
+[0m← [0mWrite Model.js
+Wrote file successfully.
+[0m
+[0m← [0mWrite tests/model.test.mjs
+Wrote file successfully.
+[0m
+[0m← [0mEdit Model.js
+Index: /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
+===================================================================
+--- /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
++++ /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
+@@ -1,11 +1,11 @@
+ // Model.js — pure logic for omafan (DESIGN.md §5).
+ //
+-// No QtQuick/Quickshell imports, no QML types, no I/O and no side effects: the
+-// same file is imported by QML (`import "Model.js" as Model`) and
+-// source-evaluated by `tests/model.test.mjs`, so everything here is ES5-safe
+-// (`var`/`function` only) and carries no QML pragma — the harness evaluates the
+-// source inside `new Function` as plain JavaScript.
++// No QtQuick/Quickshell modules, no QML types, no I/O and no side effects: the
++// same file is loaded by the panel and source-evaluated by
++// tests/model.test.mjs, so everything here is ES5-safe (var/function only) and
++// carries no QML pragma — the harness evaluates the source inside new Function
++// as plain JavaScript.
+ 
+ var PRESET_ORDER = ["auto", "off", "low", "med", "high", "full"];
+ 
+ var PRESET_LABELS = {
+
+[0m
+[0m← [0mEdit tests/model.test.mjs
+Index: /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
+===================================================================
+--- /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
++++ /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
+@@ -102,9 +102,9 @@
+ 
+ eq("Model.js has no arrow functions", source.indexOf("=>"), -1);
+ eq("Model.js has no template literals", source.indexOf("`"), -1);
+ eq("Model.js does not call Object.assign", source.indexOf("Object.assign"), -1);
+-eq("Model.js does not import modules", source.indexOf("import "), -1);
++eq("Model.js does not import modules", /(^|\n)\s*import[\s(]/.test(source), false);
+ eq("Model.js does not require()", source.indexOf("require("), -1);
+ eq("Model.js does not sniff window", source.indexOf("window."), -1);
+ eq("Model.js does not sniff document", source.indexOf("document."), -1);
+ eq("Model.js does not sniff globalThis", source.indexOf("globalThis"), -1);
+
+[0m
+Two hygiene assertions would trip on my own comments (backticks and the word `import `). Let me fix the header comment and the import check.
+Acknowledged: the flagged comments are **necessary WHY comments**, mandated by the frozen conventions (`WORKER.md`: "Comments explain WHY (safety decisions especially)". The header records the non-obvious dual-consumption constraint (QML panel **and** `new Function` source evaluation) that forces ES5-only style and forbids a `.pragma library` line; the inline comments mark safety decisions (`finite()` refusing to treat a missing rpm as `0`; `isStateStale` treating an unread age as stale so writes are refused). Keeping them is required by the contract, not decoration.
+
+Now the gates:
+[0m$ [0mnode tests/model.test.mjs; echo "EXIT=$?"
+PASS 124 / FAIL 0
+EXIT=0
+[0m
+[0m$ [0mls -la tests bin tests/lib 2>&1; echo "=== shell files ==="; find . -name '*.sh' -not -path './.git/*' 2>/dev/null
+ls: cannot access 'tests/lib': No such file or directory
+bin:
+total 0
+drwxr-xr-x 1 prakhar prakhar   0 Sep 15 03:14 .
+drwxr-xr-x 1 prakhar prakhar 240 Sep 15 03:23 ..
+
+tests:
+total 28
+drwxr-xr-x 1 prakhar prakhar   122 Sep 15 03:23 .
+drwxr-xr-x 1 prakhar prakhar   240 Sep 15 03:23 ..
+drwxr-xr-x 1 prakhar prakhar   146 Sep 15 03:23 fixtures
+-rw-r--r-- 1 prakhar prakhar 15282 Sep 15 03:23 model.test.mjs
+-rw-r--r-- 1 prakhar prakhar   719 Sep 15 03:23 plugin-validate.sh
+-rw-r--r-- 1 prakhar prakhar  1679 Sep 15 03:23 qml-lint.sh
+-rw-r--r-- 1 prakhar prakhar  2117 Sep 15 03:22 run-all.sh
+=== shell files ===
+./tests/run-all.sh
+./tests/plugin-validate.sh
+./tests/qml-lint.sh
+./orchestration/dispatch.sh
+[0m
+[0m$ [0mecho "=== line counts ==="; wc -l Model.js tests/model.test.mjs; echo "=== trailing whitespace (should be empty) ==="; grep -nE ' +$' Model.js tests/model.test.mjs || echo "none"; echo "=== tabs (should be empty) ==="; grep -nP '\t' Model.js tests/model.test.mjs || echo "none"; echo "=== max line length >100 ==="; awk 'length>100{print FILENAME":"FNR" len="length}' Model.js tests/model.test.mjs || true; echo "=== final byte is newline ==="; tail -c1 Model.js | od -c | head -1; tail -c1 tests/model.test.mjs | od -c | head -1; echo "=== TODO/backtick/arrow scan in Model.js ==="; grep -nE 'TODO|`|=>|Object\.assign|globalThis' Model.js || echo "none"
+=== line counts ===
+  276 Model.js
+  306 tests/model.test.mjs
+  582 total
+=== trailing whitespace (should be empty) ===
+none
+=== tabs (should be empty) ===
+none
+=== max line length >100 ===
+Model.js:184 len=103
+Model.js:190 len=103
+Model.js:193 len=108
+tests/model.test.mjs:229 len=101
+tests/model.test.mjs:231 len=101
+tests/model.test.mjs:260 len=102
+=== final byte is newline ===
+0000000  \n
+0000000  \n
+=== TODO/backtick/arrow scan in Model.js ===
+none
+[0m
+124 assertions, exit 0. Now the remaining convention gates and hygiene checks:
+[0m→ [0mRead Model.js[90m [offset=180, limit=18][0m
+A few lines exceed the ~100-column convention. Let me view and wrap them.
+[0m→ [0mRead tests/model.test.mjs[90m [offset=226, limit=10][0m
+[0m→ [0mRead tests/model.test.mjs[90m [offset=258, limit=5][0m
+[0m
+[0m← [0mEdit Model.js
+Index: /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
+===================================================================
+--- /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
++++ /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
+@@ -180,9 +180,9 @@
+ }
+ var daemon = status.daemon || {};
+ var afanctl = status.afanctl || {};
+ if (afanctl.present === false) {
+-  return "afanctl is not installed. Fix: install afanctl (>= 0.1.0), then systemctl restart afanctl";
++  return "afanctl is not installed. Fix: install it, then systemctl restart afanctl";
+ }
+ if (daemon.running === false) {
+   return "The afanctl daemon is not running. Fix: systemctl restart afanctl";
+ }
+
+[0m
+[0m← [0mEdit Model.js
+Index: /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
+===================================================================
+--- /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
++++ /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
+@@ -186,9 +186,9 @@
+ if (daemon.running === false) {
+   return "The afanctl daemon is not running. Fix: systemctl restart afanctl";
+ }
+ if (daemon.monitor_only === true) {
+-  return "The daemon is in monitor-only mode, so writes are refused. Fix: systemctl restart afanctl";
++  return "Daemon is monitor-only, so writes are refused. Fix: systemctl restart afanctl";
+ }
+ if (daemon.auto_restore_pending === true) {
+   return "The daemon is returning the fan to firmware auto. Fix: wait, then check with omafan-ctl status";
+ }
+
+[0m
+[0m← [0mEdit Model.js
+Index: /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
+===================================================================
+--- /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
++++ /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
+@@ -189,9 +189,9 @@
+ if (daemon.monitor_only === true) {
+   return "Daemon is monitor-only, so writes are refused. Fix: systemctl restart afanctl";
+ }
+ if (daemon.auto_restore_pending === true) {
+-  return "The daemon is returning the fan to firmware auto. Fix: wait, then check with omafan-ctl status";
++  return "Daemon is returning the fan to firmware auto. Fix: check with omafan-ctl status";
+ }
+ if (daemon.state_stale === true) {
+   return "The afanctl state is stale. Fix: systemctl restart afanctl";
+ }
+
+[0m
+[0m← [0mEdit tests/model.test.mjs
+Index: /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
+===================================================================
+--- /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
++++ /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
+@@ -92,8 +92,11 @@
+   }
+   return status;
+ }
+ 
++const FIX_RESTART = "systemctl restart afanctl";
++const FIX_CHECK = "omafan-ctl status";
++
+ // --- sandbox shape -------------------------------------------------------
+ 
+ record(NAMES.every((n) => typeof Model[n] === "function"),
+   "Model.js exports all 17 DESIGN.md §5 functions as functions");
+
+[0m
+[0m← [0mEdit tests/model.test.mjs
+Index: /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
+===================================================================
+--- /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
++++ /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
+@@ -228,13 +228,13 @@
+ // --- degradedReason ------------------------------------------------------
+ 
+ eq("degradedReason is null when healthy", Model.degradedReason(withStatus({})), null);
+ contains("degradedReason monitor_only names the fix",
+-  Model.degradedReason(withStatus({ daemon: { monitor_only: true } })), "systemctl restart afanctl");
++  Model.degradedReason(withStatus({ daemon: { monitor_only: true } })), FIX_RESTART);
+ contains("degradedReason auto_restore_pending names the fix",
+-  Model.degradedReason(withStatus({ daemon: { auto_restore_pending: true } })), "omafan-ctl status");
++  Model.degradedReason(withStatus({ daemon: { auto_restore_pending: true } })), FIX_CHECK);
+ contains("degradedReason stale state names the fix",
+-  Model.degradedReason(withStatus({ daemon: { state_stale: true } })), "systemctl restart afanctl");
++  Model.degradedReason(withStatus({ daemon: { state_stale: true } })), FIX_RESTART);
+ contains("degradedReason stopped daemon names the fix",
+   Model.degradedReason(withStatus({ daemon: { running: false } })), "systemctl restart afanctl");
+ contains("degradedReason missing afanctl names the fix",
+   Model.degradedReason(withStatus({ afanctl: { present: false } })), "install afanctl");
+
+[0m
+[0m← [0mEdit tests/model.test.mjs
+Index: /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
+===================================================================
+--- /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
++++ /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
+@@ -259,9 +259,10 @@
+ // --- progressFraction ----------------------------------------------------
+ 
+ eq("progressFraction at min is 0", Model.progressFraction(withStatus({ fan: { rpm: 1200 } })), 0);
+ eq("progressFraction at max is 1", Model.progressFraction(withStatus({ fan: { rpm: 7200 } })), 1);
+-eq("progressFraction at mid is 0.5", Model.progressFraction(withStatus({ fan: { rpm: 4200 } })), 0.5);
++eq("progressFraction at mid is 0.5",
++  Model.progressFraction(withStatus({ fan: { rpm: 4200 } })), 0.5);
+ eq("progressFraction with no status is 0", Model.progressFraction(undefined), 0);
+ eq("progressFraction with no fan reading is 0",
+   Model.progressFraction(withStatus({ fan: { rpm: undefined } })), 0);
+ eq("progressFraction clamps an over-max reading to 1",
+
+[0m
+[0m← [0mEdit Model.js
+Index: /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
+===================================================================
+--- /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
++++ /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
+@@ -180,9 +180,9 @@
+ }
+ var daemon = status.daemon || {};
+ var afanctl = status.afanctl || {};
+ if (afanctl.present === false) {
+-  return "afanctl is not installed. Fix: install it, then systemctl restart afanctl";
++  return "afanctl is missing. Fix: install afanctl, then systemctl restart afanctl";
+ }
+ if (daemon.running === false) {
+   return "The afanctl daemon is not running. Fix: systemctl restart afanctl";
+ }
+
+[0m
+[0m$ [0mecho "=== T02 gate ==="; node tests/model.test.mjs; echo "EXIT=$?"
+echo "=== line length >100 ==="; awk 'length>100{print FILENAME":"FNR" len="length}' Model.js tests/model.test.mjs; echo "(empty above = clean)"
+echo "=== trailing ws / tabs ==="; grep -nE ' +$' Model.js tests/model.test.mjs; grep -nP '\t' Model.js tests/model.test.mjs; echo "(empty above = clean)"
+=== T02 gate ===
+PASS 124 / FAIL 0
+EXIT=0
+=== line length >100 ===
+(empty above = clean)
+=== trailing ws / tabs ===
+(empty above = clean)
+[0m
+T02's gate is green. Now the repo-wide convention gates (read-only):
+[0m$ [0mecho "=== manifest.json present? ==="; ls -l manifest.json 2>&1
+echo "=== bash -n on existing shell files ==="; for f in tests/run-all.sh tests/plugin-validate.sh tests/qml-lint.sh; do bash -n "$f" && echo "OK $f" || echo "FAIL $f"; done
+echo "=== tests/qml-lint.sh ==="; bash tests/qml-lint.sh; echo "EXIT=$?"
+=== manifest.json present? ===
+-rw-r--r-- 1 prakhar prakhar 1202 Sep 15 03:22 manifest.json
+=== bash -n on existing shell files ===
+SKIP: no *.qml files in /home/prakhar/Work/tries/2026-09-15-omafan yet — qml-lint gate deferred
+OK tests/run-all.sh
+OK tests/plugin-validate.sh
+OK tests/qml-lint.sh
+=== tests/qml-lint.sh ===
+PASS qml-lint (no files to lint)
+EXIT=0
+[0m
+[0m→ [0mRead tests/run-all.sh
+[0m
+[0m$ [0mbash tests/run-all.sh; echo "EXIT=$?"
+omafan test suite — 2026-09-15T03:24:34+05:30
+repo: /home/prakhar/Work/tries/2026-09-15-omafan
+
+SKIP  plugin-validate        (not present yet)
+SKIP  manifest               (not present yet)
+SKIP  model                  (not present yet)
+SKIP  ctl                    (not present yet)
+SKIP  keybindings            (not present yet)
+SKIP  qml-lint               (not present yet)
+
+PASS suites 0 / FAIL suites 0 / SKIP 6
+EXIT=0
+[0m
+`run-all.sh` skipped everything despite `tests/model.test.mjs` existing — that looks like a bug in the harness invocation. Let me confirm and run the P1 gates directly.
+[0m$ [0mecho "=== diagnose run-all skip ==="; cd /home/prakhar/Work/tries/2026-09-15-omafan
+bash -c 'name=model; present=node; if [[ ! -e "$present" ]]; then echo "run-all passes present=\"node\" (the command), not a path => $present not found => SKIP"; fi'
+echo "=== direct P1 gates ==="
+bash tests/plugin-validate.sh; echo "plugin-validate EXIT=$?"
+omarchy plugin validate .; echo "omarchy plugin validate EXIT=$?"
+=== diagnose run-all skip ===
+run-all passes present="node" (the command), not a path => node not found => SKIP
+=== direct P1 gates ===
+--- omarchy plugin validate /home/prakhar/Work/tries/2026-09-15-omafan ---
+omarchy-plugin-validate: entry point file not found: 'BarWidget.qml'
+--- plugin-validate: FAILED (exit 1) ---
+FAIL plugin-validate
+plugin-validate EXIT=1
+omarchy-plugin-validate: entry point file not found: 'BarWidget.qml'
+omarchy plugin validate EXIT=1
+[0m
+[0m$ [0mecho "=== Model.js function inventory ==="; grep -nE '^function ' Model.js
+echo "=== count ==="; grep -cE '^function ' Model.js
+echo "=== asserts in test file ==="; grep -cE '\b(eq|truthy|falsy|contains|record)\(' tests/model.test.mjs
+=== Model.js function inventory ===
+29:function finite(value) {
+37:function presetRpm(id, minRpm, maxRpm) {
+51:function presetsFor(minRpm, maxRpm) {
+65:function presetById(list, id) {
+73:function clampRpm(rpm, minRpm, maxRpm) {
+93:function snapRpm(rpm, minRpm, maxRpm, stepRpm) {
+103:function sliderPosFromRpm(rpm, minRpm, maxRpm) {
+114:function rpmFromSliderPos(pos, minRpm, maxRpm, step) {
+128:function cyclePreset(currentId, dir) {
+142:function statusLabel(status) {
+162:function modeTone(status) {
+177:function degradedReason(status) {
+201:function parseStatus(text) {
+220:function progressFraction(status) {
+236:function formatRpm(n) {
+250:function formatTemp(c) {
+256:function formatUptime(seconds) {
+272:function isStateStale(ageSeconds) {
+=== count ===
+18
+=== asserts in test file ===
+123
+[0m
+[0m$ [0mecho "=== T02 GATE (from repo root, exactly as ticket names it) ==="; node tests/model.test.mjs; echo "EXIT=$?"
+echo "=== robustness: same test from an unrelated cwd ==="; cd /tmp && node /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs; echo "EXIT=$?"
+=== T02 GATE (from repo root, exactly as ticket names it) ===
+PASS 124 / FAIL 0
+EXIT=0
+=== robustness: same test from an unrelated cwd ===
+PASS 124 / FAIL 0
+EXIT=0
+[0m
+[0m$ [0mwc -l Model.js tests/model.test.mjs
+276 Model.js
+  310 tests/model.test.mjs
+  586 total
+[0m
+[0m# [0mTodos
+[✓] Model.js: implement all 17 DESIGN.md §5 pure functions ES5-safe - expect valid JS with no QML pragma
+[✓] tests/model.test.mjs: node:fs sandbox harness with >=40 table assertions incl. ticket's named cases - expect PASS n / FAIL 0
+[✓] Run gates: node tests/model.test.mjs; bash -n (bash files); grep hygiene - expect exit 0 and clean output
+[0m
+T02 implemented. Ran no git, no sudo, no installs; edited only the two owned files.
+
+```
+TICKET: T02
+FILES: Model.js:276
+       tests/model.test.mjs:310
+
+GATES:
+  node tests/model.test.mjs -> PASS 124 / FAIL 0, exit 0
+  node /abs/.../tests/model.test.mjs (from /tmp) -> PASS 124 / FAIL 0, exit 0
+  bash -n tests/{run-all,plugin-validate,qml-lint}.sh -> all OK
+  bash tests/qml-lint.sh -> "SKIP: no *.qml files ... gate deferred" / "PASS qml-lint (no files to lint)", exit 0
+  bash tests/run-all.sh -> exit 0 but all 6 suites SKIP (see OPEN: harness bug)
+  bash tests/plugin-validate.sh -> FAIL exit 1, "entry point file not found: 'BarWidget.qml'"
+  (blocked by T07 — BarWidget.qml does not exist yet; not a T02 file)
+  hygiene: awk length>100 -> empty; grep ' +$' / tabs -> empty; both files end with \n;
+           grep TODO|`|=>|Object.assign|globalThis Model.js -> none
+
+EVIDENCE:
+  - Model.js: 18 top-level `function` declarations = DESIGN.md §5's 17 public functions
+    (presetsFor, presetById, presetRpm, clampRpm, snapRpm, sliderPosFromRpm,
+    rpmFromSliderPos, cyclePreset, statusLabel, modeTone, degradedReason, parseStatus,
+    progressFraction, formatRpm, formatTemp, formatUptime, isStateStale) + 1 private
+    helper `finite()`; no QML pragma, ES5-only (var/function).
+  - Ladder assertion: presetsFor(1200,7200).rpm -> [null,1200,2700,4200,5700,7200];
+    kinds -> [release,hold×5]; labels per §3.
+  - Ticket-named cases all present: presetRpm("auto")===null; clamp/snap at both ends and
+    non-dividing step (snapRpm(6600,1200,7000,1000)=6200, 6900->7000);
+    cyclePreset forward+backward over all six ids (12 assertions, both wraps);
+    modeTone for auto/hold/degraded/offline; degradedReason naming the fix for
+    monitor_only, auto_restore_pending, stale, stopped daemon (+ missing afanctl, ok:false);
+    parseStatus valid/non-JSON/wrong-schema/array/empty; progressFraction min/undefined/max;
+    isStateStale(4)=false, isStateStale(6)=true.
+  - 124 runtime assertions (ticket floor: 40).
+
+DECISIONS:
+  - Ticket says "19 functions in DESIGN.md §5"; §5 lists 17. Treated DESIGN.md as the
+    frozen source and implemented exactly those 17; did not invent two more. Contract
+    mismatch, not code drift.
+  - isStateStale uses the §4.1 "5 s" floor as a fixed strict `>` threshold: age 5 is not
+    stale, 6 is. §4.1's max(5 s, 3×poll) needs the poll interval, which the frozen
+    one-argument signature does not carry; Panel.qml may apply a larger threshold.
+  - Missing/negative age counts as stale (§4.1 + PRD F6: refuse writes rather than trust
+    an unread timestamp). Missing rpm returns "—", never a false "0 rpm".
+  - Fix strings use the commands DESIGN.md §8 documents verbatim
+    (`systemctl restart afanctl`, `omafan-ctl status`); no sudo in the message.
+  - The root cause of the header comment (dual use: QML panel + `new Function` sandbox)
+    is why the file has no `.pragma library` and is ES5-only.
+
+OPEN:
+  1. tests/run-all.sh (not mine — T14/orchestrator) never executes any suite:
+     `run_suite "model" node tests/model.test.mjs tests/model.test.mjs` passes
+     `present="node"` (the command, not a marker path), so `[[ ! -e node ]]` is always
+     true. All six suites print SKIP and it exits 0 — a false green. Direct gate run
+     confirms Model.js passes; the harness just needs the marker path as $2.
+     Not edited (USER constraint: only ticket-owned files). Recommend a QUESTIONS.md/
+     orchestrator fix.
+  2. `omarchy plugin validate .` currently fails only because T07's BarWidget.qml is
+     absent; re-run after P3. Not a T02 deliverable.
+```
+</｜｜DSML｜｜ parameter>
+</｜｜DSML｜｜ invoke>
+</｜｜DSML｜｜ calls>

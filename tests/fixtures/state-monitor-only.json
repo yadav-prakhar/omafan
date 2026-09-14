@@ -1,0 +1,20 @@
+{
+  "schema": "afanctl.state.v1",
+  "ts": "2026-09-15T03:30:00+05:30",
+  "mode": "hold",
+  "t_eff_c": 66.0,
+  "target_rpm": 4200,
+  "last_written_rpm": 4200,
+  "actual_rpm": 3175,
+  "verified": false,
+  "monitor_only": true,
+  "auto_restore_pending": false,
+  "polls": 2048,
+  "watchdog_pings": 4096,
+  "recent_errors": [
+    {
+      "ts": "2026-09-15T03:28:11+05:30",
+      "msg": "fan1_output write failed three times in a row; degraded to AUTO + monitor-only (fix: systemctl restart afanctl)"
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "schema": "afanctl.state.v1",
+  "ts": "2026-09-15T03:30:00+05:30",
+  "mode": "hold",
+  "t_eff_c": 65.0,
+  "target_rpm": 4200,
+  "last_written_rpm": 4200,
+  "actual_rpm": 4180,
+  "verified": true,
+  "monitor_only": false,
+  "auto_restore_pending": false,
+  "polls": 2048,
+  "watchdog_pings": 4096,
+  "recent_errors": []
+}

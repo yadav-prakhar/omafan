@@ -28,6 +28,7 @@ A worker never edits another ticket's files and never edits `DESIGN.md`.
 | P0 | recon + contracts (done) | orchestrator | `PRD.md`, `DESIGN.md`, `PLAN.md`, `.recon/` | — | contracts frozen |
 | P1 | **T01** manifest + validate/lint harnesses | MiMo V2.5 | `manifest.json`, `tests/plugin-validate.sh`, `tests/qml-lint.sh` | — | `omarchy plugin validate .`, both harnesses exit 0 |
 | P1 | **T02** `Model.js` + node unit tests | deepseek v4.1 flash | `Model.js`, `tests/model.test.mjs` | — | `node tests/model.test.mjs` all PASS |
+| P2 | **T02b** `Model.js` undercooling-guard amendment | deepseek v4.1 flash | `Model.js`, `tests/model.test.mjs` (additive only) | T02 | new §5.1 functions table-tested; existing tests still PASS |
 | P1 | **T03** test fixtures + harness lib | deepseek v4.1 flash | `tests/fixtures/**`, `tests/lib/harness.sh` | — | `tests/lib/harness.sh` self-test; fake afanctl emulates §4 of DESIGN.md |
 | P2 | **T04** `bin/omafan-ctl` | glm 5.3 flash high | `bin/omafan-ctl` | T03 | `tests/ctl.test.sh` (T05) PASS + `--dry-run` argv proven |
 | P2 | **T05** `tests/ctl.test.sh` | deepseek v4.1 flash | `tests/ctl.test.sh` | T03, T04 | runs green against T04; every exit code §4 exercised |
@@ -92,6 +93,26 @@ opencode run --model <model> [--variant high] \
   `isStateStale(6)` true. Print `PASS n / FAIL m`, exit non-zero on any FAIL.
 - **Done:** `node tests/model.test.mjs` exits 0, ≥ 40 assertions.
 
+### T02b — `Model.js` undercooling-guard amendment (additive)
+- **Goal:** add the two DESIGN.md §5.1 functions without touching the rest.
+- **Files (own):** `Model.js`, `tests/model.test.mjs` (**additive only** — do not
+  rewrite or delete existing functions or assertions).
+- **Spec:** `isUndercoolingHot(status, targetRpm)` → true iff
+  `status.thermal.t_eff_c >= 80` and `targetRpm != null` and
+  `targetRpm < status.fan.rpm`; defensive when `status` is null/shapeless →
+  `false`. `undercoolingWarning(status, targetRpm)` → `null` unless
+  `isUndercoolingHot` is true, else a single sentence containing the temperature,
+  the current rpm, the requested rpm, the word `below`, and a safe alternative
+  (e.g. the nearest preset at or above the current rpm). ES5-safe, no imports,
+  same file style.
+- **Tests:** add a table in `tests/model.test.mjs`: cold machine → false; 80 °C
+  exactly with a lower target → true; 79 °C → false; target equal to current rpm →
+  false; target above current rpm → false; `targetRpm` null (auto) → false; null
+  `status` → false; warning text contains all four facts and the safe
+  alternative; warning is null when not undercooling.
+- **Done:** `node tests/model.test.mjs` exits 0 with the previous assertions plus
+  the new ones (report the new assertion count).
+
 ### T03 — fixtures + test harness lib
 - **Goal:** a hardware-free stand-in for afanctl plus shared bash assertions.
 - **Files (own):** `tests/fixtures/fake-afanctl`,
@@ -133,6 +154,13 @@ opencode run --model <model> [--variant high] \
   stdout; `--notify` uses `notify-send` only if present, with a failure that
   cannot change the exit code; no `eval`; no unquoted expansion; all temp files
   via `mktemp` with cleanup traps (`exec 3>file`-style clobbering is forbidden).
+  **Implement DESIGN.md §5.1 (undercooling guard, exit 8) as well.**
+- **Orchestrator ruling (R2, 2026-09-15):** `afanctl` has **no** `--runtime-dir`
+  flag — it takes the directory from the environment. omafan-ctl therefore reads
+  `<runtime-dir>/state.json` itself and exports
+  `AFANCTL_RUNTIME_DIR=<runtime-dir>` for every afanctl invocation. `--config` is
+  passed through as `--config <path>` only when the user supplied it (the afanctl
+  global it documents); never invent flags afanctl does not have.
 - **Done:** `bash -n` clean; a hand-run transcript of `status --json`,
   `presets --json`, `doctor --json`, `preset med --dry-run`,
   `rpm 99999 --json` (exit 7), `preset bogus` (exit 2) with
@@ -143,7 +171,9 @@ opencode run --model <model> [--variant high] \
 - **Goal:** every DESIGN.md §4 promise is machine-checked against the fixture.
 - **Files (own):** `tests/ctl.test.sh`.
 - **Must cover:** each verb's happy path; every documented exit code (0,1,2,3,4,
-  5,6,7) with the exact situation that produces it; `--dry-run` prints the argv
+  5,6,7,8) with the exact situation that produces it, including exit 8 (a hold
+  below the current rpm while `t_eff_c >= 80`) and that `--force` overrides 6, 7
+  and 8; `--dry-run` prints the argv
   and writes nothing (fixture argv.log stays empty); `status --json` emits a
   document that `jq` validates field-by-field (schema ids, types, min/max,
   `hold.preset` derivation incl. `custom`); `presets --json` ladder values;
@@ -226,7 +256,10 @@ opencode run --model <model> [--variant high] \
   `cursorActive`, hover sets cursor, digits 1-6, `c`, `r`, `?`, `Esc` closes help
   first, `Tab` switches panels); `release_after_minutes` timer that returns to
   auto after N minutes without interaction and is restarted whenever a poll
-  discovers an active hold; `KeyboardHelp` child toggled by `helpOpen`.
+  discovers an active hold; `KeyboardHelp` child toggled by `helpOpen`;
+  **undercooling guard** (DESIGN.md §5.1): a preset whose rpm is below the current
+  fan rpm while `t_eff_c >= 80` renders `undercoolingWarning(...)` and requires a
+  second `Enter`/click within 10 s before it is sent.
 - **Done:** `tests/qml-lint.sh` clean; live load with `OMAFAN_AFANCTL` pointed at
   the fixture shows the panel with no `qs log` errors; `omarchy-shell omafan state`
   returns the status JSON (orchestrator runs G5 and reports back).
@@ -244,13 +277,17 @@ opencode run --model <model> [--variant high] \
   `qs log -p "$OMARCHY_PATH/shell" --tail 200` and FAIL if it contains an error
   mentioning our id or file names.
 - **`hw-smoke.sh`** (`OMAFAN_HW=1` plus an interactive confirmation, else exit 0
-  with a skip): refuse unless `t_eff < 70 °C`; refuse unless `afanctl` is present
-  and the daemon is running; then, in order: read state → `preset low` → verify
-  `hold.active` with the expected rpm within 5 s → `preset med` → same check →
-  `preset full` for at most 2 s → **`release` immediately** → verify
-  `mode=observe`, `manual=false` and that `afanctl status --json` agrees → print a
-  final table. An `EXIT` trap must call `release` (and verify it) on any failure
-  or interrupt. Nothing in the script may touch `/sys` directly.
+  with a skip): refuse unless `afanctl` is present and the daemon is running;
+  **hot-machine policy — never reduce airflow that the firmware already
+  established**: read `t_eff_c` and the live rpm first and (a) if `t_eff_c >= 75`
+  only exercise holds at or **above** the current rpm (`high`, `full`) and skip
+  `off`/`low`/`med` with a printed note, (b) if `t_eff_c < 60` exercise the full
+  ladder. Then, in order: read state → apply each allowed preset → verify
+  `hold.active` with the expected rpm within 5 s → for `full`, hold for at most
+  2 s → **`release` immediately** → verify `mode=observe`, `manual=false` and that
+  `afanctl status --json` agrees → print a final table. An `EXIT` trap must call
+  `release` (and verify it) on any failure or interrupt. Nothing in the script may
+  touch `/sys` directly.
 - **Done:** `bash -n` clean on both; `integration-shell.sh` green live
   (orchestrator) and `hw-smoke.sh` refusing cleanly without `OMAFAN_HW=1`.
 

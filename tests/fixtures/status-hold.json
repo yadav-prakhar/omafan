@@ -1,0 +1,33 @@
+{
+  "schema": "afanctl.status.v1",
+  "daemon": {
+    "running": true,
+    "mode": "hold",
+    "monitor_only": false,
+    "auto_restore_pending": false,
+    "watchdog_armed": true,
+    "uptime_s": 2048
+  },
+  "sensors": [
+    { "label": "Package id 0", "temp_c": 65.0 },
+    { "label": "Core 0", "temp_c": 64.0 },
+    { "label": "Core 1", "temp_c": 63.0 }
+  ],
+  "effective": { "temp_c": 65.0, "method": "max" },
+  "fan": {
+    "rpm": 4180,
+    "min_rpm": 1200,
+    "max_rpm": 7200,
+    "target_rpm": 4200,
+    "manual": true
+  },
+  "config": {
+    "high_c": 66,
+    "max_c": 86,
+    "min_rpm": 1200,
+    "max_rpm": 6200,
+    "interval_s": 1,
+    "source": "/etc/afanctl/afanctl.toml"
+  },
+  "recent_errors": []
+}

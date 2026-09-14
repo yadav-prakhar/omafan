@@ -138,6 +138,7 @@ Exit codes (frozen; a bad flag never exits 0):
 | 5 | afanctl daemon not running / runtime dir unreadable / `state.json` absent |
 | 6 | daemon degraded (`monitor_only` or `auto_restore_pending`) — writes refused; `--force` overrides |
 | 7 | rpm outside `[fan_min_rpm, fan_max_rpm]` — writes refused |
+| 8 | refused as an undercooling risk (§5.1) — writes refused; `--force` overrides |
 
 Write path: `pkexec <afanctl> hold <rpm>` / `pkexec <afanctl> observe`.
 `--dry-run` prints the argv it *would* run and exits 0 without executing.
@@ -239,9 +240,36 @@ formatRpm(n)                                -> string                  // "4,200
 formatTemp(c)                               -> string                  // "64 °C"
 formatUptime(seconds)                       -> string                  // "1 h 22 m" / "45 s"
 isStateStale(ageSeconds)                    -> bool
+isUndercoolingHot(status, targetRpm)        -> bool                      // see §3.1
+undercoolingWarning(status, targetRpm)      -> string | null             // human, names the risk + what to do
 ```
 
 `label`s are English; `formatRpm` uses a plain `,` thousands separator (no locale).
+
+### 5.1 Undercooling guard (added 2026-09-15 after a live finding)
+
+*Live finding, 03:30 IST:* the reference machine sat at `t_eff 97 °C` with the
+firmware running the fan at 4128–4794 rpm while the parallel build loaded the
+CPU. On a hot machine, three of the six presets (`off` 1200, `low` 2700,
+`med` 4200) command **less** airflow than the firmware already is — the plugin
+can therefore cool the machine *down* in the middle of a hot workload.
+
+Frozen behaviour:
+
+- `isUndercoolingHot(status, targetRpm)` is true when
+  `status.thermal.t_eff_c >= 80` **and** `targetRpm != null` **and**
+  `targetRpm < status.fan.rpm` (the requested hold is below what the fan is
+  doing now).
+- The panel and the CLI never silently apply such a preset: the first attempt
+  arms a confirmation (the panel renders `undercoolingWarning(...)` and requires
+  a second `Enter`/click within 10 s; `omafan-ctl` refuses with exit 8 and the
+  same message unless `--force` is given).
+- `auto`, and any preset at or above the current rpm, are never blocked.
+- The warning names the temperature, the current rpm, the requested rpm and the
+  safe alternatives, e.g. *"CPU 97 °C, fan 4794 rpm: Low holds 2700 rpm, below
+  the firmware curve. Press Enter again within 10 s to override, or pick Medium
+  or higher."*
+- Exit code **8** = refused as an undercooling risk (`--force` overrides).
 
 ## 6. QML contract
 
@@ -306,7 +334,7 @@ keyboard and pointer share one highlight.
 | `h` / `←` | presets: previous preset · slider: −1 step (100 rpm) |
 | `l` / `→` | presets: next preset · slider: +1 step |
 | `Shift` + `h`/`l` | slider: ±500 rpm |
-| `Enter` / `Space` | presets: apply focused preset · slider: apply current value now |
+| `Enter` / `Space` | presets: apply focused preset (a second press confirms an undercooling-risk preset, §5.1) · slider: apply current value now |
 | `1`…`6` | apply `auto, off, low, med, high, full` directly |
 | `c` | cycle presets forward (`auto → off → low → med → high → full → auto`) |
 | `r` | refresh status now |
@@ -379,6 +407,9 @@ Rules:
   to firmware auto after N minutes of no interaction — an optional safety net
   for a forgotten hold. Its timer restarts when a status poll discovers an active
   hold and the setting is non-zero.
+- **Undercooling guard** (DESIGN.md §5.1): on a hot machine, a preset that holds
+  the fan below its current speed needs a deliberate second confirmation. The
+  plugin never quietly reduces airflow the firmware had already raised.
 - Uninstall is `omarchy plugin remove io.github.yadav-prakhar.omafan`; the only
   things omafan ever writes outside its own directory are `~/.config/omarchy/shell.json`
   (by `omarchy plugin enable`, the shell's own doing) and the managed
