@@ -34,10 +34,18 @@ Panel {
   property string lastError: ""
   property bool busy: false
   property var pendingRpm: null
+  // T09c D3: true when a status poll failed or was killed at its deadline —
+  // the previous document stays rendered but is visibly marked as stale.
   property string focusSection: "presets"   // "presets" | "slider" (DESIGN.md 6.2)
   property int selectedIndex: 0             // slider uses the -1 sentinel
   property bool cursorActive: false
   property bool helpOpen: false
+
+  // D4: full documents (--with the per-sensor list) are requested on panel open
+  // and every tenth poll; the flag survives a refresh refused while busy so no
+  // full round is silently dropped.
+  property int pollCount: 0
+  property bool fullPending: false
 
   // Undercooling guard (DESIGN.md 5.1): the preset awaiting its confirming
   // second Enter within 10 s.
@@ -64,7 +72,11 @@ Panel {
     return out
   }
 
-  readonly property var statusArgv: root.withGlobalFlags([root.ctlPath, "status", "--json"])
+  readonly property var statusArgv: {
+    var args = [root.ctlPath, "status", "--json"]
+    if (root.fullPending) args.push("--full")
+    return root.withGlobalFlags(args)
+  }
 
   // From inline shell.json (base Panel.setting()). Defaults mirror manifest.json.
   readonly property int pollSeconds: Math.min(10, Math.max(1, Math.round(Number(root.setting("poll_seconds", 2)) || 2)))
@@ -124,9 +136,56 @@ Panel {
     return out
   }
 
-  function verifiedRender() {
-    if (!root.statusDoc || !root.statusDoc.fan) return "—"
-    return root.statusDoc.fan.verified === true ? "yes" : "no"
+  // D1: the header reads "CPU <temp> · Fan <rpm>" with an em dash for any
+  // unknown value — never a fabricated number, never a dangling separator such
+  // as "CPU · Fan..." (T04c stops the CLI emitting null t_eff_c on the fast
+  // path; until then the panel renders the gap honestly).
+  function headerText() {
+    var doc = root.statusDoc
+    var temp = doc && doc.thermal ? doc.thermal.t_eff_c : null
+    var rpm = doc && doc.fan ? doc.fan.rpm : null
+    var tempStr = Model.formatTemp(temp)      // "64 °C" or "—"
+    var rpmStr = Model.formatRpm(rpm)         // "6,078 rpm" or "—"
+    return "CPU " + tempStr + " · Fan " + rpmStr
+  }
+
+  // D2: the daemon's verified flag from state.json (state.v1 carries it; the
+  // fast-path document exposes it in fan.verified). Unknown is neither a pass
+  // nor a fault, so it renders as "not verified" only while a hold is active.
+  function holdVerified() {
+    var doc = root.statusDoc
+    if (!doc || !doc.fan) return false
+    return doc.fan.verified === true
+  }
+
+  // D2: "Uptime <value> · Polls <n>" always (em dash for anything unknown);
+  // the verification clause appears only while a hold is on, because with no
+  // hold nothing is being written and "Verified: no" would read as a fault.
+  function footerText() {
+    var doc = root.statusDoc
+    var daemon = doc && doc.daemon ? doc.daemon : null
+    var uptime = daemon ? Model.formatUptime(daemon.uptime_s) : "—"
+    var polls = daemon && daemon.polls !== null && daemon.polls !== undefined
+      ? String(daemon.polls) : "—"
+    var text = "Uptime " + uptime + " · Polls " + polls
+    if (root.holdActive) {
+      text += root.holdVerified() ? " · verified" : " · not verified"
+    }
+    return text
+  }
+
+  // D4: sensor rows from a --full document; empty on the fast path, which is
+  // exactly when the footer/header carries the load alone.
+  readonly property var sensorRows: {
+    var doc = root.statusDoc
+    var out = []
+    if (!doc || !doc.thermal || !doc.thermal.sensors) return out
+    for (var i = 0; i < doc.thermal.sensors.length; i++) {
+      var s = doc.thermal.sensors[i]
+      if (s && s.label !== undefined && s.temp_c !== null && s.temp_c !== undefined)
+        out.push({ label: String(s.label), temp: Model.formatTemp(s.temp_c) })
+    }
+    return out
   }
 
   // ----------------------------------------------------------- cursor model
@@ -203,8 +262,10 @@ Panel {
     if (cmdProc.running) return
     root.lastError = ""
     root.busy = true
+    cmdProc.timedOut = false
     cmdProc.command = root.withGlobalFlags([root.ctlPath].concat(args))
     cmdProc.running = true
+    commandDeadline.restart()
   }
 
   // The undercooling confirmation (DESIGN.md 5.1): a hot-machine preset below
@@ -212,6 +273,9 @@ Panel {
   // within 10 s. The second attempt carries --force because the panel has
   // confirmed deliberately — it is not a silent override.
   function applyPreset(id) {
+    // T09c D4: a preset press while a write is in flight is ignored, not
+    // stacked, and not allowed to re-arm the undercooling confirmation.
+    if (root.busy || cmdProc.running) return
     var rpm = Model.presetRpm(id, root.fanMinRpm, root.fanMaxRpm)
     if (rpm !== null && root.haveBand && Model.isUndercoolingHot(root.statusDoc, rpm)) {
       if (root.armedPresetId !== id) {
@@ -263,14 +327,23 @@ Panel {
 
   function refresh() {
     if (statusProc.running || root.busy) return
+    if (cmdProc.running) return
+    statusProc.timedOut = false
+    statusProc.command = root.statusArgv
     statusProc.running = true
+    statusDeadline.restart()
+    // One full document per request: the flag is consumed here so a poll that
+    // lands mid-doctor does not keep re-asking afanctl for sensors.
+    root.fullPending = false
   }
 
   function applyStatus(text) {
+    if (statusProc.timedOut) return // killed at its deadline: content is not a status document
     root.rawStatusText = String(text || "").trim()
     var parsed = Model.parseStatus(root.rawStatusText)
     if (parsed.ok) {
       root.status = parsed.status
+      root.statusStale = false
       root.lastError = ""
       // Track the daemon's own target while a hold is on — the footer renders
       // that truth, so the knob must not lag behind it. Never while the user
@@ -284,8 +357,10 @@ Panel {
       if (root.releaseAfterMinutes > 0 && root.holdActive) releaseTimer.restart()
       else releaseTimer.stop()
     } else {
-      root.status = null
-      root.pendingRpm = null
+      // T09c D3: a failed poll keeps the previous document rendered but marks
+      // it stale, so the numbers are visibly old and the poll timer keeps
+      // running — the panel recovers by itself once omafan-ctl answers again.
+      root.statusStale = true
       if (root.lastError === "") {
         root.lastError = "Cannot read the fan state: " + parsed.error +
           ". Fix: run bin/omafan-ctl status --json by hand, then systemctl restart afanctl"
@@ -343,8 +418,16 @@ Panel {
   }
 
   // --------------------------------------------------------------- processes
+  // T09c D1: (20 s) — the panel must never be frozen by a runner that never
+  // answers (e.g. an unanswered polkit password prompt). Both deadlines are
+  // started whenever their process is started.
+  readonly property int commandDeadlineMs: 20000
+  readonly property string commandTimeoutMessage: "omafan-ctl did not answer within 20 s — a polkit password prompt may be waiting (run `omafan-ctl doctor`); the fan's last verified state is shown below"
+  readonly property string statusTimeoutMessage: "omafan-ctl status did not answer within 20 s — the panel is showing the last state it received. Fix: run `omafan-ctl doctor`, then `systemctl restart afanctl`"
+
   Process {
     id: statusProc
+    property bool timedOut: false
     command: root.statusArgv
     stdout: StdioCollector {
       waitForEnd: true
@@ -356,6 +439,7 @@ Panel {
     id: cmdProc
     property string cmdOut: ""
     property string cmdErr: ""
+    property bool timedOut: false
 
     stdout: StdioCollector {
       waitForEnd: true
@@ -372,12 +456,46 @@ Panel {
     // so both captures above are final here.
     onExited: function(code) {
       root.busy = false
-      if (code !== 0) {
+      if (code !== 0 && !cmdProc.timedOut) {
+        // A dead runner killed at its deadline already has the better message;
+        // never overwrite it with the generic failure line (T09c D2: the kill
+        // is also never rendered as success — no text here claims a write).
         var fix = cmdProc.cmdErr.trim().split("\n")[0]
         root.lastError = "omafan-ctl failed." + (fix !== "" ? " " + fix : "") +
           " Fix: run bin/omafan-ctl doctor"
       }
       Qt.callLater(root.refresh)
+    }
+  }
+
+  Timer {
+    id: commandDeadline
+    interval: root.commandDeadlineMs
+    // T09c D1: a never-answering write must not hold `busy` forever. Kill it,
+    // release the lock, name the symptom and the fix; the kill's own onExited
+    // (nonzero, timedOut) deliberately keeps this message.
+    onTriggered: {
+      if (!cmdProc.running) return
+      cmdProc.timedOut = true
+      cmdProc.running = false // kills the process
+      root.busy = false
+      root.pendingRpm = null
+      root.lastError = root.commandTimeoutMessage
+    }
+  }
+
+  Timer {
+    id: statusDeadline
+    interval: root.commandDeadlineMs
+    // T09c D3: a never-answering status poll keeps the previous document but
+    // marks it stale; the poll timer itself never stops, so the panel recovers
+    // on its own when omafan-ctl answers again.
+    onTriggered: {
+      if (!statusProc.running) return
+      statusProc.timedOut = true
+      statusProc.running = false // kills the process
+      root.statusStale = true
+      root.lastError = root.statusTimeoutMessage
     }
   }
 
@@ -389,7 +507,13 @@ Panel {
     interval: root.pollSeconds * 1000
     running: true
     repeat: true
-    onTriggered: root.refresh()
+    onTriggered: {
+      // D4: one full (per-sensor) document every tenth poll; the 2 s fast
+      // cadence is kept for the hero/footer values.
+      root.pollCount++
+      if (root.pollCount % 10 === 0) root.fullPending = true
+      root.refresh()
+    }
   }
 
   Timer {
@@ -424,6 +548,8 @@ Panel {
     root.focusSection = "presets"
     root.selectedIndex = 0
     root.cursorActive = false
+    // D4: sensors are fetched when the panel opens, not only on the tenth poll.
+    root.fullPending = true
     root.refresh()
   }
 
@@ -517,11 +643,7 @@ Panel {
 
               Text {
                 textFormat: Text.PlainText
-                text: {
-                  var temp = root.statusDoc && root.statusDoc.thermal ? root.statusDoc.thermal.t_eff_c : null
-                  var rpm = root.statusDoc && root.statusDoc.fan ? root.statusDoc.fan.rpm : null
-                  return "CPU " + Model.formatTemp(temp) + " · Fan " + Model.formatRpm(rpm)
-                }
+                text: root.headerText()
                 color: root.barForeground
                 font.family: root.bar ? root.bar.fontFamily : Style.font.family
                 font.pixelSize: Style.font.title
@@ -542,6 +664,20 @@ Panel {
                 font.pixelSize: Style.font.caption
                 font.bold: true
                 font.letterSpacing: 1.2
+                elide: Text.ElideRight
+                width: parent.width
+              }
+
+              // T09c D3: the stale badge — old numbers are rendered, never
+              // silently passed off as live.
+              Text {
+                visible: root.statusStale
+                textFormat: Text.PlainText
+                text: "STATUS STALE — showing the last state omafan-ctl answered with"
+                color: Color.urgent
+                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.caption
+                font.bold: true
                 elide: Text.ElideRight
                 width: parent.width
               }
@@ -704,18 +840,30 @@ Panel {
 
             Text {
               textFormat: Text.PlainText
-              text: {
-                var daemon = root.statusDoc && root.statusDoc.daemon ? root.statusDoc.daemon : null
-                if (daemon === null) return "Daemon: unknown"
-                return "Uptime " + Model.formatUptime(daemon.uptime_s) +
-                  " · Polls " + (daemon.polls !== undefined ? String(daemon.polls) : "—") +
-                  " · Verified: " + root.verifiedRender()
-              }
+              text: root.footerText()
               color: Qt.darker(root.barForeground, 1.4)
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
               font.pixelSize: Style.font.caption
               elide: Text.ElideRight
               width: parent.width
+            }
+
+            // D4: the per-sensor rows a --full document provides (the 2 s fast
+            // path carries none, so nothing is invented in between). Each row
+            // is daemon data rendered verbatim as plain text.
+            Repeater {
+              model: root.sensorRows
+
+              Text {
+                required property var modelData
+                textFormat: Text.PlainText
+                text: modelData.label + " " + modelData.temp
+                color: Qt.darker(root.barForeground, 1.4)
+                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideRight
+                width: parent.width
+              }
             }
 
             Repeater {
@@ -773,7 +921,10 @@ Panel {
 
       Text {
         textFormat: Text.PlainText
-        text: chip.presetData ? (chip.presetData.label || chip.presetId) : "—"
+        // D3: the full "Off (hardware floor)" label overflows the chip's third
+        // of the content width and renders truncated on screen; the short form
+        // is honest because the floors footnote carries the full wording.
+        text: chip.presetId === "off" ? "Off (floor)" : (chip.presetData ? (chip.presetData.label || chip.presetId) : "—")
         color: root.barForeground
         font.family: root.bar ? root.bar.fontFamily : Style.font.family
         font.pixelSize: Style.font.caption

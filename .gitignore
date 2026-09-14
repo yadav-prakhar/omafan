@@ -1,1 +1,15 @@
+# Local recon artefacts (screenshots of the machine, raw notes)
 .recon/
+
+# Worker transcripts: kept on disk for the operator, not shipped (the distilled
+# record is orchestration/LEDGER.md + orchestration/REVIEW-*.md)
+orchestration/logs/
+orchestration/backups/
+
+# Tool state written into the repo by the agent CLIs used for the build
+.omo/
+
+# Test scratch
+/tmp-*/
+*.tmp
+*.log

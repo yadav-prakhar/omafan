@@ -10,9 +10,16 @@
 #     granted to wheel users in a local active session by afanctl's own
 #     polkit rule, so reads need no privilege runner at all.
 #   - Write verbs run pkexec (unless --pkexec none, for tests/dev). The
-#     runtime dir travels as AFANCTL_RUNTIME_DIR (orchestrator ruling R2:
-#     afanctl takes its runtime dir from the environment only) - passed
-#     through `pkexec env` because pkexec scrubs the caller's environment.
+#     privileged argv is exactly [<runner>, <afanctl>, verb, args]: afanctl's
+#     polkit rule re-checks program realpath and matches argv[0..] exactly,
+#     so anything between the runner and the binary (a `env` wrapper) makes
+#     the rule answer NOT_HANDLED and pkexec falls back to a password prompt
+#     that only a human at the agent can answer. Consequence: a custom
+#     runtime dir cannot ride along on a privileged write, and a custom
+#     --config cannot either (same argv pin) - both are refused up front.
+#   - Every runner invocation is bounded by timeout: a polkit fallback to a
+#     password prompt would otherwise hang the caller (and the panel) forever.
+#     A timeout is reported as exit 3, never as success.
 #   - Nothing here writes /sys, /etc, /usr or /run/afanctl. The only file
 #     written outside the runtime dir is the hardware-limit cache at
 #     $XDG_RUNTIME_DIR/omafan/hw.json (fallback /tmp/omafan-<uid>/hw.json).
@@ -32,6 +39,21 @@ readonly STATE_FAN_MAX_INPUT=100000
 # Staleness of state.json is max(5 s, 3 x poll interval). The poll interval is
 # not in state.json and the daemon default is 1 s, so the 5 s floor wins.
 readonly STALE_AFTER_S=5
+readonly AC_DEFAULT_RUNTIME_DIR="/run/afanctl" # reads honour the caller; runner writes need this default
+# Bounded waits: a runner that is waiting for a human answer must never hang
+# the caller (ticket T04d D3). notify-send returns in ~10 ms here but is
+# guarded the same way.
+readonly RUNNER_TIMEOUT_S=20
+readonly PROBE_TIMEOUT_S=3
+readonly NOTIFY_TIMEOUT_S=5
+# timeout is resolved to the absolute GNU coreutils path on purpose: a
+# caller (or a hostile PATH) may clip PATH to a tiny set (the test suite
+# does exactly that); the hang guard must not be defeatable that way.
+if [ -x /usr/bin/timeout ]; then
+    readonly TIMEOUT_BIN="/usr/bin/timeout"
+else
+    readonly TIMEOUT_BIN="$(command -v timeout 2>/dev/null || true)"
+fi
 readonly CACHE_TTL_S=86400 # hardware-limit cache lifetime (section 4.1: 24 h)
 
 # Globals; every one is overridable by flag in any position, and by env where
@@ -52,6 +74,8 @@ ac_env=()
 ac_args=()
 hw_min=""
 hw_max=""
+cached_interval="" # daemon poll interval from the hw cache (empty = unknown)
+hw_cache_file="" # path chosen by load_limits (empty = cache unusable)
 warnings_json="[]"
 
 Tmpfiles=()
@@ -112,10 +136,12 @@ EOF
 }
 
 notify_user() {
-    # A missing or failing notify-send must never change the exit code.
+    # A missing or failing notify-send must never change the exit code, and it
+    # must never be able to hang the caller either (T04d D3).
     [ "$want_notify" = "true" ] || return 0
     if command -v notify-send >/dev/null 2>&1; then
-        notify-send -a omafan "Fan Control" "$1" >/dev/null 2>&1 || true
+        "$TIMEOUT_BIN" "$NOTIFY_TIMEOUT_S" \
+            notify-send -a omafan "Fan Control" "$1" >/dev/null 2>&1 || true
     fi
 }
 
@@ -303,10 +329,13 @@ is_state_stale() {
 load_limits() {
     # Fresh cache wins; otherwise one direct afanctl query (never pkexec); an
     # unwritable cache is a warning, never an error (section 4.1). Sets
-    # hw_min/hw_max (empty when unknown) and returns 0/1.
+    # hw_min/hw_max (empty when unknown) and returns 0/1. Also sets
+    # cached_interval (the daemon's poll interval, section 4.1's uptime
+    # derivation) whenever the cache or a live status carries it.
     local primary_dir="" fallback_dir="" cache_file=""
-    local captured min max status_json stale_ok=""
+    local captured min max status_json stale_ok="" interval interval_lit
     hw_min="" hw_max=""
+    cached_interval=""
     if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
         primary_dir="${XDG_RUNTIME_DIR%/}/omafan"
     fi
@@ -322,16 +351,19 @@ load_limits() {
     else
         add_warning "hardware limits cache not writable; afanctl will be queried whenever limits are needed"
     fi
+    hw_cache_file="$cache_file"
 
-    min="" max=""
+    min="" max="" interval=""
     if [ -n "$cache_file" ] && [ -r "$cache_file" ]; then
         captured="$(jq -r '.captured_at // 0' -- "$cache_file" 2>/dev/null || echo 0)"
         case "$captured" in '' | *[!0-9]*) captured=0 ;; esac
         min="$(jq -r '.fan_min_rpm // empty' -- "$cache_file" 2>/dev/null || echo "")"
         max="$(jq -r '.fan_max_rpm // empty' -- "$cache_file" 2>/dev/null || echo "")"
+        interval="$(jq -r '.interval_s // empty' -- "$cache_file" 2>/dev/null || echo "")"
+        case "$interval" in '' | *[!0-9]* | 0) interval="" ;; esac
         if [ -n "$min" ] && [ -n "$max" ] && [ "$min" -lt "$max" ] 2>/dev/null; then
             if [ "$(( $(date +%s) - captured ))" -lt "$CACHE_TTL_S" ]; then
-                hw_min="$min" hw_max="$max"
+                hw_min="$min" hw_max="$max" cached_interval="$interval"
                 return 0
             fi
             stale_ok="true" # keep as a fallback if afanctl cannot be asked
@@ -343,7 +375,7 @@ load_limits() {
 
     if ! afanctl_path >/dev/null 2>&1; then
         if [ -n "$min" ]; then
-            hw_min="$min" hw_max="$max"
+            hw_min="$min" hw_max="$max" cached_interval="$interval"
             add_warning "afanctl ($afanctl_bin) not reachable; using the stale hardware limits cache"
             return 0
         fi
@@ -351,7 +383,7 @@ load_limits() {
     fi
     if ! status_json="$(query_afanctl_status)"; then
         if [ -n "$min" ]; then
-            hw_min="$min" hw_max="$max"
+            hw_min="$min" hw_max="$max" cached_interval="$interval"
             add_warning "afanctl status failed; using the stale hardware limits cache"
             return 0
         fi
@@ -359,6 +391,8 @@ load_limits() {
     fi
     min="$(printf '%s' "$status_json" | jq -r '.fan.min_rpm // empty')"
     max="$(printf '%s' "$status_json" | jq -r '.fan.max_rpm // empty')"
+    interval="$(printf '%s' "$status_json" | jq -r '.config.interval_s // empty')"
+    case "$interval" in '' | *[!0-9]* | 0) interval="" ;; esac
     case "${min:-x}" in '' | *[!0-9]*) return 1 ;; esac
     case "${max:-x}" in '' | *[!0-9]*) return 1 ;; esac
     if [ "$min" -ge "$max" ]; then
@@ -366,12 +400,22 @@ load_limits() {
     fi
     hw_min="$min"
     hw_max="$max"
+    cached_interval="$interval"
     if [ -n "$cache_file" ]; then
         local ver=""
         ver="$(afanctl_version 2>/dev/null || true)"
+        if [ -n "$interval" ]; then
+            interval_lit="$interval"
+        else
+            interval_lit=null
+        fi
+        # interval_s rides along in the cache so the fast-path uptime_s
+        # derivation (polls x interval) never needs a live afanctl call.
         if ! jq -cn --argjson min "$hw_min" --argjson max "$hw_max" \
                 --argjson now "$(date +%s)" --arg ver "$ver" \
-                '{fan_min_rpm: $min, fan_max_rpm: $max, captured_at: $now, afanctl_version: $ver}' \
+                --argjson interval "$interval_lit" \
+                '{fan_min_rpm: $min, fan_max_rpm: $max, captured_at: $now,
+                  afanctl_version: $ver, interval_s: $interval}' \
                 >"$cache_file" 2>/dev/null; then
             add_warning "hardware limits cache not writable at $cache_file"
         fi
@@ -484,6 +528,13 @@ write_prereqs() {
     if ! afanctl_path >/dev/null; then
         fail_action 4 afanctl_missing "$(msg_afanctl_missing)"
     fi
+    # D2 gate, before the state read: a caller writing with a runner while
+    # pointing reads at a custom runtime dir would otherwise be misreported
+    # as "daemon down" (no state there) instead of told the real limitation.
+    if [ "$pkexec_bin" != "none" ] && [ "$runtime_dir" != "$AC_DEFAULT_RUNTIME_DIR" ]; then
+        fail_action 2 runtime_dir_unsupported \
+            "pkexec cannot carry a custom runtime dir (afanctl's polkit rule pins the argv, and pkexec sanitises the environment); writes target afanctl's default $AC_DEFAULT_RUNTIME_DIR - unset --runtime-dir/OMAFAN_RUNTIME_DIR, or use --pkexec none for tests. Reads still read the directory you asked for ($runtime_dir)"
+    fi
     # A write with no readable state would fly blind: the degraded latch, the
     # band and the undercooling guard all hang off that state. Refuse.
     if ! read_state; then
@@ -527,32 +578,38 @@ assert_band() {
     fi
 }
 
-run_write() {
-    # $1 action kind, $2 preset id or "", $3 rpm JSON literal (null = observe)
-    local kind="$1" preset_id="$2" rpm_lit="$3"
-    local -a runner_args mode_args argv
+runner_argv() {
+    # The runner's argv, printed by --dry-run and executed by the write path.
+    # T04d D1 (blocker): exactly [<runner>, <afanctl>, verb, args]. Anything
+    # else between runner and binary makes afanctl's polkit rule answer
+    # NOT_HANDLED (it pins the program realpath and the argv), so pkexec falls
+    # back to a password prompt that scripts can never answer.
     if [ "$rpm_lit" = "null" ]; then
         mode_args=(observe)
     else
         mode_args=(hold "$rpm_lit")
     fi
     if [ "$pkexec_bin" = "none" ]; then
-        # Tests/dev: run the binary directly under our environment.
+        # Tests/dev: the binary runs directly under our environment, so the
+        # runtime dir and --config can travel (env + ac_args) as usual.
         argv=("$afanctl_resolved" ${ac_args[@]+"${ac_args[@]}"} "${mode_args[@]}")
-        runner_env=("${ac_env[@]}")
+        runner_env=(env "${ac_env[@]}")
     else
         local runner
         if ! runner="$(command -v -- "$pkexec_bin" 2>/dev/null)"; then
             fail_action 3 pkexec_missing \
                 "'$pkexec_bin' is not found, so the privileged write cannot run. Fix: install polkit (or --pkexec none, tests/dev only)"
         fi
-        # pkexec scrubs the environment, so AFANCTL_RUNTIME_DIR must be set
-        # inside the privileged child: `pkexec env VAR=... program args`.
-        argv=("$runner" env "${ac_env[@]}" "$afanctl_resolved" \
-            ${ac_args[@]+"${ac_args[@]}"} "${mode_args[@]}")
+        argv=("$runner" "$afanctl_resolved" "${mode_args[@]}")
         runner_env=()
     fi
+}
 
+run_write() {
+    # $1 action kind, $2 preset id or "", $3 rpm JSON literal (null = observe)
+    local kind="$1" preset_id="$2" rpm_lit="$3"
+    local -a argv
+    runner_argv
     if [ "$want_dry_run" = "true" ]; then
         if [ "$output_mode" = "human" ]; then
             printf 'argv: %s\n' "${argv[*]}"
@@ -572,9 +629,16 @@ run_write() {
     local out rc err message
     err="$(tmpfile)"
     rc="0"
-    out="$(env "${runner_env[@]}" "${argv[@]}" 2>"$err")" || rc="$?"
+    # D3: bounded wait. A runner blocked on an unanswered polkit prompt must
+    # never hang the caller; the timeout is reported, never reported as success.
+    out="$("${TIMEOUT_BIN:?}" "$RUNNER_TIMEOUT_S" \
+        ${runner_env[@]+"${runner_env[@]}"} "${argv[@]}" 2>"$err")" || rc="$?"
     if [ "$rc" -ne 0 ]; then
         cat -- "$err" >&2
+        if [ "$rc" -eq 124 ]; then
+            fail_action 3 authorisation_timeout \
+                "authorisation timed out or was cancelled - is the polkit agent running? (pkexec falls back to a password prompt when /usr/share/polkit-1/rules.d/49-afanctl.rules does not match)"
+        fi
         local polkit_hint="Fix: check the polkit rule in /usr/share/polkit-1/rules.d/, or run doctor --json"
         if [ "$rc" -eq 126 ] || [ "$rc" -eq 127 ]; then
             fail_action 3 not_authorized \
@@ -615,6 +679,7 @@ run_status() {
     local daemon_json fan_json hold_json thermal_json presets_json
     local hold_rpm hold_preset sensors_json="[]"
     local t_eff="$ST_T_EFF" state_stale="false"
+    local uptime interval merged
 
     if ! afanctl_path >/dev/null; then
         # The daemon side is dead too; emit the document (truthful) with
@@ -662,6 +727,23 @@ run_status() {
             sensors_json="$(printf '%s' "$full_json" | jq -c '.sensors // []')"
             t_eff="$(printf '%s' "$full_json" | jq -c '.effective.temp_c // null')"
             full_uptime="$(printf '%s' "$full_json" | jq -c '.daemon.uptime_s // null')"
+            # D2 priming: --full is the documented way to cache the poll
+            # interval, so persist it even when the limits themselves came
+            # from a still-fresh cache (a plain --full must be enough; the
+            # limits are untouched, only interval_s is added).
+            interval="$(printf '%s' "$full_json" | jq -r '.config.interval_s // empty')"
+            case "$interval" in '' | *[!0-9]* | 0) interval="" ;; esac
+            if [ -n "$interval" ] && [ -n "$hw_cache_file" ] && [ -w "$hw_cache_file" ]; then
+                cached_interval="$interval"
+                merged="$(tmpfile)"
+                if jq --argjson interval "$interval" '.interval_s = $interval' \
+                    -- "$hw_cache_file" >"$merged" 2>/dev/null \
+                    && mv -- "$merged" "$hw_cache_file"; then
+                    :
+                else
+                    add_warning "poll interval could not be cached at $hw_cache_file"
+                fi
+            fi
         else
             rc_out=1
             add_warning "afanctl status failed (--full); the index render continues from state.json"
@@ -674,6 +756,32 @@ run_status() {
     if read_state; then
         if is_state_stale "$ST_AGE"; then
             state_stale="true"
+        fi
+        # D1 fix: state.json carries t_eff_c, so on the fast path (no --full
+        # query, or a --full query that failed) the temperature comes from the
+        # state document; null only when it is genuinely absent.
+        if [ "$t_eff" = "null" ]; then
+            t_eff="$ST_T_EFF"
+        fi
+        # D2 fix: uptime on the fast path is derived, never queried: DESIGN.md
+        # 4.1 says uptime_s = polls x poll.interval_s, and the interval is
+        # cached in hw.json by whichever run last talked to afanctl for
+        # limits. Unknown interval keeps uptime_s null with a warning.
+        uptime="$full_uptime"
+        if [ "$uptime" = "null" ]; then
+            case "$ST_POLLS" in
+                '' | *[!0-9]*)
+                    :
+                    ;;
+                *)
+                    if [ -n "$cached_interval" ]; then
+                        uptime=$((ST_POLLS * cached_interval))
+                    fi
+                    ;;
+            esac
+        fi
+        if [ "$uptime" = "null" ]; then
+            add_warning "poll interval unknown; run omafan-ctl status --full once to cache it"
         fi
         if [ "$ST_MODE" = "hold" ]; then
             hold_rpm="$(printf '%s' "$ST_STATE" | jq -c '.target_rpm // .last_written_rpm // null')"
@@ -697,10 +805,13 @@ run_status() {
             --arg mode "$ST_MODE" \
             '{rpm: $rpm, target_rpm: $tgt, manual: ($mode == "hold")}')"
         daemon_json="$(jq -cn --argjson st "$ST_STATE" --argjson age "$ST_AGE" \
-            --argjson stale "$state_stale" --argjson up "$full_uptime" \
+            --argjson stale "$state_stale" --argjson up "$uptime" \
             '{running: true, mode: $st.mode, monitor_only: $st.monitor_only,
               auto_restore_pending: $st.auto_restore_pending, uptime_s: $up,
               polls: $st.polls, state_age_s: $age, state_stale: $stale}')"
+        # On the fast path sensors stays [] by design: state.json has no
+        # per-sensor detail, so the document is truthful with an empty list;
+        # the panel asks for --full when it needs the sensor breakdown.
         thermal_json="$(jq -cn --argjson t "$t_eff" --argjson sensors "$sensors_json" \
             '{t_eff_c: $t, sensors: $sensors}')"
     else
@@ -842,6 +953,37 @@ run_doctor() {
     else
         add_check polkit_rule WARN \
             "no afanctl rule in /usr/share/polkit-1/rules.d/; pkexec writes may prompt for a password"
+    fi
+
+    # T04d D4: prove the privileged write path before a user leans on it.
+    # pkexec falls back to a password prompt when the polkit rule does not
+    # match, which hangs a write forever - make that failure visible from
+    # doctor instead of only when the panel refuses a press.
+    if [ "$pkexec_bin" = "none" ]; then
+        add_check pkexec_write_path WARN "privileged writes disabled with --pkexec none"
+    elif [ -z "${pkexec_resolved:-}" ]; then
+        add_check pkexec_write_path WARN \
+            "'$pkexec_bin' is not found, so the probe could not run; writes will fail"
+    elif [ -z "$ac_path" ]; then
+        add_check pkexec_write_path WARN \
+            "afanctl is missing, so the write-path probe could not run; fix afanctl first"
+    else
+        local probe_rc=0 probe_out="" probe_ms_start probe_ms
+        probe_ms_start="$(date +%s%3N)"
+        probe_out="$("$TIMEOUT_BIN" "$PROBE_TIMEOUT_S" "$pkexec_resolved" \
+            "$ac_path" status --json 2>/dev/null)" || probe_rc="$?"
+        probe_ms=$(( $(date +%s%3N) - probe_ms_start ))
+        if [ "$probe_rc" -eq 0 ] \
+                && printf '%s' "$probe_out" | jq -e '.schema == "afanctl.status.v1"' >/dev/null 2>&1; then
+            add_check pkexec_write_path PASS \
+                "polkit authorises /usr/bin/afanctl status --json in ${probe_ms} ms"
+        elif [ "$probe_rc" -eq 124 ]; then
+            add_check pkexec_write_path FAIL \
+                "pkexec did not answer within ${PROBE_TIMEOUT_S}s - it is prompting for a password, so writes will hang; check the polkit rule and that the session is local and active"
+        else
+            add_check pkexec_write_path FAIL \
+                "afanctl status through pkexec exited rc=$probe_rc, so privileged writes are not authorised; fix: check the polkit rule and that the session is local and active"
+        fi
     fi
 
     if has_sys_glob "/sys/devices/platform/applesmc.*"; then
