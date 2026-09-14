@@ -64,6 +64,16 @@ because these two files were owned by completed tickets:
   overrides, and a fresh state writes normally. Not yet covered by a regression
   case in `tests/ctl.test.sh` (open item, listed in `docs/BUILD-LOG.md`).
 
+- **R8 — two documentation corrections from REVIEW-R1.** (a) `DESIGN.md §7` claimed
+  `tests/keybindings.test.sh` reproduces the free-chord analysis; it runs entirely
+  against a stub `hyprctl` and a sandboxed Lua tree, so the sentence now attributes
+  the analysis to orchestration-time evidence (PRD §2.7 + the live install record)
+  and names the suite for what it is: a stub-based regression guard. (b)
+  `DESIGN.md §6.2` described the preset chips as a "single horizontal row of 6";
+  what shipped is a 2×3 grid that the keyboard cursor still treats as one row, so
+  the wording was corrected to match the artifact (the grid is the better UI at
+  this panel width). Affected: T12 (docs), T13.
+
 ## Rejected proposals
 
 - Relaxing afanctl's polkit rule to accept an `env` wrapper, instead of fixing the

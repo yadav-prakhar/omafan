@@ -360,8 +360,11 @@ State: `status` (parsed), `lastError`, `busy`, `pendingRpm`, `focusSection`
 (`presets|slider`), `selectedIndex`, `cursorActive`, `helpOpen`, `pollSeconds`.
 
 Sections cursor model (same shape as `omarchy.monitor`'s panel):
-`visibleSections` = `["presets","slider"]`; `presets` is a single horizontal row
-of 6 (`h`/`l` moves between presets, `k`/`j` moves to/from `slider`); `slider` is
+`visibleSections` = `["presets","slider"]`; `presets` is a block of six chips that
+the cursor treats as one row (`h`/`l` walks it, `k`/`j` leaves it) — rendered as a
+2×3 grid because that fits the panel width (REVIEW-R1 R1-15 corrected the earlier
+"single horizontal row" wording, which was never what shipped)
+(`h`/`l` walks the chips, `k`/`j` moves to/from `slider`); `slider` is
 a lone row with `selectedIndex = -1`. Mouse hover sets the same cursor state so
 keyboard and pointer share one highlight.
 
@@ -392,7 +395,12 @@ close help first (`helpOpen` handler runs before `root.close()`).
 
 **Verified free on this machine** against the live compositor (`hyprctl binds -j`,
 175 bound chords) *and* against the Omarchy default + user Lua sources (including
-`code:` chords). Free-chord analysis is reproduced by `tests/keybindings.test.sh`.
+`code:` chords). That analysis is **orchestration-time evidence, not a test**: it
+was performed with `hyprctl binds -j` and a read of the Omarchy + user Lua sources
+during recon (recorded in `PRD.md` §2.7) and re-confirmed live when the block was
+installed (`orchestration/LEDGER.md`). `tests/keybindings.test.sh` is the
+stub-based regression guard for the installer — it does not and cannot consult the
+live compositor (REVIEW-R1 R1-4).
 
 | Chord | Description | Command |
 |---|---|---|
