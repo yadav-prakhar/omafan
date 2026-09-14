@@ -183,6 +183,15 @@ never changes the exit code.
   `target_rpm ?? last_written_rpm`; `hold.preset` = the preset id whose rpm equals
   `hold.rpm`, else `"custom"`.
 - `warnings[]` are non-fatal human strings (`"hardware limits cache not writable"`).
+- **Exit-code interaction (R6, 2026-09-15):** `status` always renders a document
+  when it can, even when the daemon is unavailable — it exits **5** in that case
+  (the exit code is the script-facing signal) *and* sets
+  `daemon.running: false` plus a `warnings[]` entry (the document is the
+  UI-facing signal). Consumers — including `Panel.qml` — must parse stdout
+  regardless of the exit code and read `daemon.running` from the document; a
+  non-zero exit from `status` is not a parse failure. Exit 5 remains the only
+  outcome of a **write** verb when the daemon is unavailable (with the §4.3 error
+  object and no write attempted).
 
 ### 4.2 JSON: `omafan.presets.v1`
 

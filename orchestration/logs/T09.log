@@ -2,3 +2,268 @@
 [0m
 > Sisyphus - ultraworker · glm-5.3-flash
 [0m
+[0m→ [0mRead orchestration/instructions/WORKER.md
+[0m→ [0mRead PRD.md
+[0m→ [0mRead DESIGN.md
+[0m→ [0mRead PLAN.md
+[0m→ [0mRead orchestration/tickets/T09.md
+I read this as implementation: execute T09 per the listed docs. Reading files now.
+[0m→ [0mRead /usr/share/omarchy/shell/Ui/Panel.qml
+[0m→ [0mRead /usr/share/omarchy/shell/Ui/KeyboardPanel.qml
+[0m→ [0mRead /usr/share/omarchy/shell/Ui/PanelKeyCatcher.qml
+[0m→ [0mRead .
+I'll implement T09 (Panel.qml) directly. Reading the reference QML sources and existing repo files first.
+[0m→ [0mRead /home/prakhar/.config/omarchy/plugins/omaplug/BarWidget.qml
+[0m→ [0mRead BarWidget.qml
+[0m→ [0mRead Model.js
+[0m→ [0mRead KeyboardHelp.qml
+[0m→ [0mRead /usr/share/omarchy/shell/plugins/panels/monitor/Panel.qml
+[0m→ [0mRead /usr/share/omarchy/shell/Ui/PanelSlider.qml
+Reference pattern captured. Checking PanelSlider API, the ctl helper, and the lint gate.
+[0m
+[0m$ [0mls -la bin tests tests/fixtures 2>/dev/null; head -40 bin/omafan-ctl 2>/dev/null; ls usr 2>/dev/null
+bin:
+total 56
+drwxr-xr-x 1 prakhar prakhar    56 Sep 15 03:44 .
+drwxr-xr-x 1 prakhar prakhar   306 Sep 15 03:44 ..
+-rwxr-xr-x 1 prakhar prakhar 39899 Sep 15 03:44 omafan-ctl
+-rwxr-xr-x 1 prakhar prakhar 15083 Sep 15 03:44 omafan-keybindings
+
+tests:
+total 52
+drwxr-xr-x 1 prakhar prakhar   198 Sep 15 03:43 .
+drwxr-xr-x 1 prakhar prakhar   306 Sep 15 03:44 ..
+drwxr-xr-x 1 prakhar prakhar   170 Sep 15 03:24 fixtures
+-rwxr-xr-x 1 prakhar prakhar 11848 Sep 15 03:40 keybindings.test.sh
+drwxr-xr-x 1 prakhar prakhar    20 Sep 15 03:24 lib
+-rwxr-xr-x 1 prakhar prakhar  3216 Sep 15 03:26 manifest.test.sh
+-rw-r--r-- 1 prakhar prakhar 18589 Sep 15 03:28 model.test.mjs
+-rwxr-xr-x 1 prakhar prakhar   719 Sep 15 03:23 plugin-validate.sh
+-rwxr-xr-x 1 prakhar prakhar  4692 Sep 15 03:27 qml-lint.sh
+-rwxr-xr-x 1 prakhar prakhar  2180 Sep 15 03:43 run-all.sh
+
+tests/fixtures:
+total 28
+drwxr-xr-x 1 prakhar prakhar  170 Sep 15 03:24 .
+drwxr-xr-x 1 prakhar prakhar  198 Sep 15 03:43 ..
+-rwxr-xr-x 1 prakhar prakhar 9902 Sep 15 03:24 fake-afanctl
+-rw-r--r-- 1 prakhar prakhar  325 Sep 15 03:23 state-hold.json
+-rw-r--r-- 1 prakhar prakhar  508 Sep 15 03:23 state-monitor-only.json
+-rw-r--r-- 1 prakhar prakhar  713 Sep 15 03:23 status-hold.json
+-rw-r--r-- 1 prakhar prakhar  717 Sep 15 03:23 status-observe.json
+#!/usr/bin/env bash
+# bin/omafan-ctl - the only omafan component that talks to afanctl.
+#
+# Implements DESIGN.md section 4 (verbs, globals, env, exit codes, JSON
+# schemas, dry-run, notify, degraded/stale/absent handling) and section 5.1
+# (the undercooling guard, exit 8).
+#
+# Safety posture:
+#   - Read verbs (status/presets/doctor) NEVER run pkexec; afanctl status is
+#     granted to wheel users in a local active session by afanctl's own
+#     polkit rule, so reads need no privilege runner at all.
+#   - Write verbs run pkexec (unless --pkexec none, for tests/dev). The
+#     runtime dir travels as AFANCTL_RUNTIME_DIR (orchestrator ruling R2:
+#     afanctl takes its runtime dir from the environment only) - passed
+#     through `pkexec env` because pkexec scrubs the caller's environment.
+#   - Nothing here writes /sys, /etc, /usr or /run/afanctl. The only file
+#     written outside the runtime dir is the hardware-limit cache at
+#     $XDG_RUNTIME_DIR/omafan/hw.json (fallback /tmp/omafan-<uid>/hw.json).
+#   - Every failure exits non-zero: a human line naming the problem and the
+#     fix goes to stderr and (JSON mode) the error envelope to stdout.
+#   - No eval, no unquoted expansions; scratch files only via mktemp + trap.
+
+set -euo pipefail
+
+readonly OMAFAN_CTL_VERSION="1.0.0"
+readonly STATUS_SCHEMA="omafan.status.v1"
+readonly PRESETS_SCHEMA="omafan.presets.v1"
+readonly ACTION_SCHEMA="omafan.action.v1"
+readonly DOCTOR_SCHEMA="omafan.doctor.v1"
+readonly STATE_SCHEMA="afanctl.state.v1"
+readonly STATE_FAN_MAX_INPUT=100000
+# Staleness of state.json is max(5 s, 3 x poll interval). The poll interval is
+# not in state.json and the daemon default is 1 s, so the 5 s floor wins.
+readonly STALE_AFTER_S=5
+readonly CACHE_TTL_S=86400 # hardware-limit cache lifetime (section 4.1: 24 h)
+
+# Globals; every one is overridable by flag in any position, and by env where
+# DESIGN.md documents it.
+afanctl_bin="${OMAFAN_AFANCTL:-afanctl}"
+runtime_dir="${OMAFAN_RUNTIME_DIR:-/run/afanctl}"
+[0m
+[0m$ [0mgrep -n "urgent\|accent" /usr/share/omarchy/shell/Commons/Color.qml | head; grep -rn "sendCommand\|panelItem" tests/integration* 2>/dev/null | head; cat tests/fixtures/status-hold.json
+8:// accent, urgent) comes from theme/colors.toml. Per-surface roles come from
+21:  property color accent: "#cacccc"
+22:  property color urgent: "#a55555"
+56:    if (role === "accent") return root.accent
+57:    if (role === "urgent") return root.urgent
+76:    property color active: root.pick("bar.active", root.urgent)
+81:    property color border: root.composed("popups.border", "popups.border-alpha", root.accent, 1.0)
+91:    property color border: root.composed("notifications.border", "notifications.border-alpha", root.accent, 1.0)
+92:    property color countdown: root.pick("notifications.countdown", root.accent)
+100:    property color selectedText: root.pick("menu.selected-text", root.accent)
+{
+  "schema": "afanctl.status.v1",
+  "daemon": {
+    "running": true,
+    "mode": "hold",
+    "monitor_only": false,
+    "auto_restore_pending": false,
+    "watchdog_armed": true,
+    "uptime_s": 2048
+  },
+  "sensors": [
+    { "label": "Package id 0", "temp_c": 65.0 },
+    { "label": "Core 0", "temp_c": 64.0 },
+    { "label": "Core 1", "temp_c": 63.0 }
+  ],
+  "effective": { "temp_c": 65.0, "method": "max" },
+  "fan": {
+    "rpm": 4180,
+    "min_rpm": 1200,
+    "max_rpm": 7200,
+    "target_rpm": 4200,
+    "manual": true
+  },
+  "config": {
+    "high_c": 66,
+    "max_c": 86,
+    "min_rpm": 1200,
+    "max_rpm": 6200,
+    "interval_s": 1,
+    "source": "/etc/afanctl/afanctl.toml"
+  },
+  "recent_errors": []
+}
+zsh:1: no matches found: tests/integration*
+[0m
+[0m$ [0mgrep -n "action.v1\|--json\|emit_action\|action_json" bin/omafan-ctl | head -30; grep -n "preset\]())\|function main\|case .preset" bin/omafan-ctl | head
+28:readonly ACTION_SCHEMA="omafan.action.v1"
+75:  omafan-ctl status  [--json|--human] [--full] [globals]
+76:  omafan-ctl presets [--json|--human]          [globals]
+77:  omafan-ctl doctor  [--json|--human]          [globals]
+92:  --json / --human        output format (default: json)
+119:readonly FIX_STATUS="Fix: run: omafan-ctl status --json"
+128:        "Fix: run afanctl status --json by hand and check the daemon"
+217:# Run `$afanctl status --json` directly (a read; never pkexec). Prints the
+225:        ${ac_args[@]+"${ac_args[@]}"} status --json 2>"$err")" || rc="$?"
+459:action_json() {
+572:        local polkit_hint="Fix: check the polkit rule in /usr/share/polkit-1/rules.d/, or run doctor --json"
+598:        action_json "$ACTION_SCHEMA" "$kind" "$preset_id" "$rpm_lit" "$message" "${argv[@]}"
+856:            "hardware limits unknown (no cache; afanctl status failed). Fix: run afanctl status --json by hand"
+940:            "hardware limits unknown, so the band cannot be checked. Fix: run afanctl status --json by hand"
+965:        --json) output_mode="json" ;;
+[0m
+All references gathered. Writing `Panel.qml` now.
+[0m← [0mWrite Panel.qml
+Wrote file successfully.
+[0m
+[0m✗ [0mWrite Panel.qml failed
+[91m[1mError: [0mFile already exists. Use edit tool instead.
+Rewriting with the recursion and helper duplication cleaned up.
+[0m
+[0m$ [0mrm /home/prakhar/Work/tries/2026-09-15-omafan/Panel.qml
+(no output)
+[0m
+[0m← [0mWrite Panel.qml
+Wrote file successfully.
+[0m
+[0m← [0mEdit Panel.qml
+Index: /home/prakhar/Work/tries/2026-09-15-omafan/Panel.qml
+===================================================================
+--- /home/prakhar/Work/tries/2026-09-15-omafan/Panel.qml
++++ /home/prakhar/Work/tries/2026-09-15-omafan/Panel.qml
+@@ -129,10 +129,14 @@
+   return root.statusDoc.fan.verified === true ? "yes" : "no"
+ }
+ 
+ // ----------------------------------------------------------- cursor model
++// DESIGN.md 6.2: exactly two sections; presets is a single horizontal row,
++// the slider is a lone row with the -1 sentinel.
++readonly property var visibleSections: ["presets", "slider"]
++
+ function moveSection(dir) {
+-  var idx = visibleSections.indexOf(root.focusSection)
++  var idx = root.visibleSections.indexOf(root.focusSection)
+   if (idx < 0) { root.focusSection = "presets"; root.selectedIndex = 0; return }
+   var next = idx + dir
+   if (next < 0 || next >= visibleSections.length) return
+   root.focusSection = visibleSections[next]
+
+[0m
+[0m← [0mEdit Panel.qml
+Index: /home/prakhar/Work/tries/2026-09-15-omafan/Panel.qml
+===================================================================
+--- /home/prakhar/Work/tries/2026-09-15-omafan/Panel.qml
++++ /home/prakhar/Work/tries/2026-09-15-omafan/Panel.qml
+@@ -137,10 +137,10 @@
+ function moveSection(dir) {
+   var idx = root.visibleSections.indexOf(root.focusSection)
+   if (idx < 0) { root.focusSection = "presets"; root.selectedIndex = 0; return }
+   var next = idx + dir
+-  if (next < 0 || next >= visibleSections.length) return
+-  root.focusSection = visibleSections[next]
++  if (next < 0 || next >= root.visibleSections.length) return
++  root.focusSection = root.visibleSections[next]
+   root.selectedIndex = root.focusSection === "presets" ? 0 : -1
+   root.cursorActive = true
+ }
+ 
+
+[0m
+Two gaps to fix: `visibleSections` is referenced but never declared, and `rpmSliderDragging` was a typo.
+[0m← [0mEdit Panel.qml
+Index: /home/prakhar/Work/tries/2026-09-15-omafan/Panel.qml
+===================================================================
+--- /home/prakhar/Work/tries/2026-09-15-omafan/Panel.qml
++++ /home/prakhar/Work/tries/2026-09-15-omafan/Panel.qml
+@@ -274,9 +274,9 @@
+ root.lastError = ""
+ // Track the daemon's own target while a hold is on — the footer renders
+ // that truth, so the knob must not lag behind it. Never while the user
+ // is mid-drag or a debounced write is about to land.
+-if (!sliderSend.running && !rpmSliderDragging && root.holdActive && root.holdDoc
++if (!sliderSend.running && !rpmSlider.dragging && root.holdActive && root.holdDoc
+     && root.holdDoc.rpm !== null && root.holdDoc.rpm !== undefined) {
+   root.pendingRpm = root.holdDoc.rpm
+ }
+ // release_after_minutes: restart whenever a poll discovers a hold and
+
+[0m
+Now running the gates.
+[0m$ [0mbash tests/qml-lint.sh; echo "EXIT=$?"
+PASS qml-lint: 3 file(s) clean; 103 expected non-fatal warning(s) about qs.* members
+EXIT=0
+[0m
+[0m$ [0momarchy plugin validate .; echo "EXIT=$?"
+EXIT=0
+[0m
+[0m$ [0mwc -l Panel.qml; grep -n "execDetached\|TODO\|/sys\|pkexec" Panel.qml; echo "---"; grep -cn "cmdProc.running\|StdioCollector" Panel.qml
+811 Panel.qml
+13:// /sys and never talks to afanctl directly — every write goes through
+59:    var flags = ["--afanctl", "--runtime-dir", "--pkexec"]
+---
+6
+[0m
+T09 complete. Gates run and green.
+
+**TICKET:** T09 — `Panel.qml`
+**FILES:** `Panel.qml`: 811 lines (only file owned/created)
+**GATES:**
+- `bash tests/qml-lint.sh` → `PASS qml-lint: 3 file(s) clean; 103 expected non-fatal warning(s) about qs.* members` — exit 0
+- `omarchy plugin validate .` → exit 0, no output (clean)
+
+**EVIDENCE:**
+- Both processes use the `Quickshell.Io` `Process` **array** `command:` form + `StdioCollector` (grep confirms 6 hits, no `execDetached`)
+- No `todo` markers, no `/sys` touch (grep clean; `/sys` appears once in a comment)
+- IPC: one `IpcHandler target: "omafan"` with all 8 methods (`toggle/open/close/preset/rpm/release/refresh/state`); `state()` returns last raw `omafan.status.v1` stdout verbatim
+
+**DECISIONS:**
+1. `ctlPath` resolved exactly per ruling R4 via `Qt.resolvedUrl("bin/omafan-ctl").toString().replace(/^file:\/\//, "")`; `--afanctl/--runtime-dir/--pkexec args added only when OMAFAN_* env are set (shared `withGlobalFlags()` for status AND write calls, since §4 makes them globals).
+2. Undercooling guard (§5.1) uses `Model.isUndercoolingHot/undercoolingWarning`; the confirmed second attempt sends `--force` because the panel has already confirmed — without it the CLI would refuse with exit 8 after the user had deliberately confirmed.
+3. `presetList` falls back to `Model.presetsFor(0,0)` (rpm-less labels) only before the first good poll; slider/band fields are read verbatim from the doc's `hardware`/`slider`.
+4. PanelKeyCatcher does not expose modifiers, so Shift+h/l arrive as uppercase `onTextKey("H"/"L")` and are mapped to ±5 slider steps; lowercase `h/l` on the slider section arrive via `onMoveRequested(dx)` = ±1 step.
+5. `state()` returns `""` when no status has ever been read (task spec says "the last `omafan.status.v1` JSON, verbatim" — nothing fictional is substituted for an unread daemon).
+
+**OPEN:** Live-load verification (`qs log`) and the G5 IPC round-trip (`omarchy-shell omafan toggle/preset/state`) are orchestrator-run per the ticket's Done section; local gates are clean and the QML follows the `omarchy.monitor` panel pattern they verified working.

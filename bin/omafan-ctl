@@ -76,6 +76,8 @@ USAGE:
   omafan-ctl presets [--json|--human]          [globals]
   omafan-ctl doctor  [--json|--human]          [globals]
   omafan-ctl preset <auto|off|low|med|high|full> [--notify] [--dry-run] [globals]
+  omafan-ctl cycle  [--notify] [--dry-run] [--force] [globals]
+                          # next preset in ladder order (DESIGN.md section 4.5)
   omafan-ctl rpm <integer 0..100000> [--notify] [--dry-run] [--force] [globals]
   omafan-ctl release [--notify] [--dry-run] [globals]   # alias of `preset auto`
   omafan-ctl version | --version | -h | --help
@@ -102,6 +104,10 @@ EXIT CODES:
   6 daemon degraded: monitor_only or auto_restore_pending (writes refused)
   7 rpm outside [fan_min_rpm, fan_max_rpm] (writes refused)
   8 refused as an undercooling risk (DESIGN.md section 5.1)
+
+NOTE: `status` prints a status document even when the daemon is down; it then
+      exits 5 with daemon.running:false in the document. A write verb exits 5
+      without writing when the daemon is down.
 EOF
 }
 
@@ -258,7 +264,8 @@ read_state() {
     if [ ! -r "$state_file" ]; then
         return 1
     fi
-    if ! parsed="$(jq -e --arg schema "$STATE_SCHEMA" 'select(.schema == $schema)' -- "$state_file" 2>/dev/null)"; then
+    if ! parsed="$(jq -e --arg schema "$STATE_SCHEMA" \
+            'select(.schema == $schema)' -- "$state_file" 2>/dev/null)"; then
         fail 1 unparsable "$ACTION_SCHEMA" \
             "state.json at $runtime_dir is not the documented $STATE_SCHEMA JSON. $FIX_RESTART_AC"
     fi
@@ -449,8 +456,10 @@ is_undercooling_hot() {
 undercooling_message() {
     # Names the temperature, the current rpm, the request and the way out
     # (section 5.1), for CLI phrasing of the panel's confirmation text.
-    printf 'CPU %s °C, fan %s rpm: %s holds %s rpm, below the firmware curve. Safe alternative: a preset at or above %s rpm (such as high), or re-run with --force to override.' \
-        "$ST_T_EFF" "$ST_ACTUAL" "$1" "$2" "$ST_ACTUAL"
+    printf 'CPU %s °C, fan %s rpm: %s holds %s rpm, below the firmware curve.\n' \
+        "$ST_T_EFF" "$ST_ACTUAL" "$1" "$2"
+    printf 'Safe alternative: a preset at or above %s rpm (such as high), or re-run with --force to override.' \
+        "$ST_ACTUAL"
 }
 
 action_json() {
@@ -566,14 +575,14 @@ run_write() {
     out="$(env "${runner_env[@]}" "${argv[@]}" 2>"$err")" || rc="$?"
     if [ "$rc" -ne 0 ]; then
         cat -- "$err" >&2
-        local polkit_hint="Fix: check the polkit rule /usr/share/polkit-1/rules.d/49-afanctl.rules, or run doctor --json"
+        local polkit_hint="Fix: check the polkit rule in /usr/share/polkit-1/rules.d/, or run doctor --json"
         if [ "$rc" -eq 126 ] || [ "$rc" -eq 127 ]; then
             fail_action 3 not_authorized \
-                "authorisation denied or cancelled while running the write (rc=$rc). $polkit_hint"
+                "authorisation denied or cancelled (rc=$rc). $polkit_hint"
         fi
         if grep -q "Not authorized" -- "$err" 2>/dev/null; then
             fail_action 3 not_authorized \
-                'pkexec reported "Not authorized". Fix: the polkit rule must grant hold/observe/status to wheel users in a local session'
+                'pkexec reported "Not authorized". Fix: the polkit rule must grant hold/observe verbs to wheel locally'
         fi
         fail_action 1 write_failed \
             "afanctl exited with rc=$rc (stderr above). Fix: read status, then check afanctl recent_errors"
@@ -886,31 +895,103 @@ run_doctor() {
     exit "$rc"
 }
 
+# ---------------- cycle (DESIGN.md section 4.5) ----------------
+# Current preset id from the state the caller has already read: hold.preset
+# when the applied mode is "hold", else "auto". A hold at a non-preset rpm is
+# reported as "custom" (section 4.1 derivation).
+cycle_current_preset() {
+    if [ "$ST_MODE" = "hold" ]; then
+        local hold_rpm pid pr
+        hold_rpm="$(printf '%s' "$ST_STATE" | jq -c '.target_rpm // .last_written_rpm // null')"
+        if [ "$hold_rpm" != "null" ] && [ -n "$hw_min" ]; then
+            for pid in off low med high full; do
+                pr="$(preset_rpm "$pid")" || pr=""
+                if [ "$hold_rpm" = "$pr" ]; then
+                    printf '%s\n' "$pid"
+                    return 0
+                fi
+            done
+        fi
+        printf 'custom\n'
+        return 0
+    fi
+    printf 'auto\n'
+}
+
+# Next = one step forward in the ladder of section 3 with wraparound, exactly
+# Model.cyclePreset(current, +1) for the six known ids (the order lives in
+# Model.js; it is mirrored here only because the CLI cannot import it). A
+# custom hold cycles straight to the floor: "a hold at a non-preset rpm cycles
+# to off" (section 4.5).
+cycle_next_preset() {
+    case "$1" in
+        custom) printf 'off\n' ;;
+        auto) printf 'off\n' ;;
+        off) printf 'low\n' ;;
+        low) printf 'med\n' ;;
+        med) printf 'high\n' ;;
+        high) printf 'full\n' ;;
+        full) printf 'auto\n' ;;
+        *) printf 'auto\n' ;;
+    esac
+}
+
+do_cycle() {
+    # Reads state first (the current preset hangs off it), then applies the
+    # next preset through the very same path as `preset <next>`: identical
+    # validation, undercooling guard, exit codes and JSON envelope.
+    if ! afanctl_path >/dev/null; then
+        fail_action 4 afanctl_missing "$(msg_afanctl_missing)"
+    fi
+    # Without state there is no current preset to step from. A dry-run previews
+    # with whatever state is readable (best-effort) but never fails on its
+    # absence, matching write_prereqs' "a preview works without a daemon".
+    if [ "$want_dry_run" != "true" ]; then
+        if ! read_state; then
+            fail_action 5 daemon_down \
+                "daemon not running or state.json at $runtime_dir unreadable. $FIX_RESTART_AC"
+        fi
+    else
+        read_state || true
+    fi
+    # The preset-matching above needs the hardware band; a read, never pkexec.
+    if ! load_limits; then
+        # Derivation can still run: mode=observe -> auto; a hold just reads
+        # as custom -> off. The apply path re-checks limits and fails there.
+        :
+    fi
+    local current next
+    current="$(cycle_current_preset)"
+    next="$(cycle_next_preset "$current")"
+    do_write_preset "$next" "cycle"
+}
+
 do_write_preset() {
-    # $1 preset id
-    local pid="$1"
+    # $1 preset id, $2 action kind override ("preset" default, "cycle")
+    local pid="$1" action_kind="${2:-preset}"
     if ! is_valid_preset_id "$pid"; then
         usage_error "unknown preset '$pid'. Fix: one of auto|off|low|med|high|full"
     fi
     if ! afanctl_path >/dev/null; then
-        fail_action 4 afanctl_missing "afanctl binary '$afanctl_bin' is missing or not executable. Fix: install afanctl (see its packaging/ directory)"
+        fail_action 4 afanctl_missing "$(msg_afanctl_missing)"
     fi
     if [ "$pid" != "auto" ] && ! load_limits; then
-        fail_action 1 limits_unavailable "hardware limits unknown (afanctl status did not work; see stderr). Fix: run afanctl status --json by hand and check the daemon"
+        fail_action 1 limits_unavailable "$(msg_limits_unavailable)"
     fi
     write_prereqs
     if [ "$pid" = "auto" ]; then
-        run_write "preset" "auto" "null"
+        run_write "$action_kind" "auto" "null"
         return 0
     fi
     local rpm_val label
     rpm_val="$(preset_rpm "$pid")"
     if [ -z "$rpm_val" ]; then
-        fail_action 1 limits_unavailable "preset '$pid' has no rpm because the hardware band is unknown. Fix: check afanctl status --json"
+        fail_action 1 limits_unavailable \
+            "preset '$pid' has no rpm because the hardware band is unknown. $FIX_STATUS"
     fi
     label="$(preset_label "$pid")"
     assert_undercooling "$label" "$rpm_val"
-    run_write "preset" "$pid" "$rpm_val"
+    run_write "$action_kind" "$pid" "$rpm_val"
 }
 
 do_write_rpm() {
@@ -925,19 +1006,22 @@ do_write_rpm() {
             ;;
     esac
     if [ "$rpm_raw" -gt "$STATE_FAN_MAX_INPUT" ]; then
-        usage_error "rpm $rpm_raw exceeds the CLI limit $STATE_FAN_MAX_INPUT. Fix: give an rpm in 0..$STATE_FAN_MAX_INPUT"
+        usage_error \
+            "rpm $rpm_raw exceeds the CLI limit $STATE_FAN_MAX_INPUT. Fix: give an rpm in 0..$STATE_FAN_MAX_INPUT"
     fi
     if ! afanctl_path >/dev/null; then
-        fail_action 4 afanctl_missing "afanctl binary '$afanctl_bin' is missing or not executable. Fix: install afanctl (see its packaging/ directory)"
+        fail_action 4 afanctl_missing "$(msg_afanctl_missing)"
     fi
     if ! load_limits; then
-        fail_action 1 limits_unavailable "hardware limits unknown, so the band cannot be checked. Fix: run afanctl status --json by hand"
+        fail_action 1 limits_unavailable \
+            "hardware limits unknown, so the band cannot be checked. Fix: run afanctl status --json by hand"
     fi
     write_prereqs
     if [ -n "$hw_min" ] && [ "$hw_min" -gt 0 ]; then
         if [ "$rpm_raw" -lt "$hw_min" ] || [ "$rpm_raw" -gt "$hw_max" ]; then
             if [ "$want_force" != "true" ]; then
-                fail_action 7 rpm_out_of_band "$rpm_raw rpm is outside the hardware fan band $hw_min..$hw_max. Fix: give an rpm in $hw_min..$hw_max"
+                fail_action 7 rpm_out_of_band \
+                    "$rpm_raw rpm is outside the hardware fan band $hw_min..$hw_max. Fix: give an rpm in that range"
             fi
         fi
     fi
@@ -1007,7 +1091,7 @@ afanctl_prepare
 
 case "${verb:-}" in
     "")
-        usage_error "no verb given. Fix: one of status|presets|doctor|preset|rpm|release|version"
+        usage_error "no verb given. Fix: one of status|presets|doctor|preset|cycle|rpm|release|version"
         ;;
     version)
         run_version
@@ -1036,7 +1120,13 @@ case "${verb:-}" in
     release)
         do_write_preset "auto"
         ;;
+    cycle)
+        if [ "${#verb_args[@]}" -gt 1 ]; then
+            usage_error "cycle takes no arguments. Fix: run: omafan-ctl cycle"
+        fi
+        do_cycle
+        ;;
     *)
-        usage_error "unknown verb '$verb'. Fix: one of status|presets|doctor|preset|rpm|release|version"
+        usage_error "unknown verb '$verb'. Fix: one of status|presets|doctor|preset|cycle|rpm|release|version"
         ;;
 esac

@@ -61,6 +61,10 @@ sandbox() {
     OMAFAN_STATE_DIR="$dir/state"
     OMAFAN_DEFAULT_BINDINGS_DIR="$dir/defaults"
     OMAFAN_STUB_MEM="$dir/mem.json"
+    # T06b: the helper override defaults to unset, so the plugin's own
+    # bin/omafan-ctl resolves; cases that exercise the guard export their own.
+    unset OMAFAN_CTL
+    SANDBOXDIR="$dir"
     HOMEDIR="$dir/home"
     HKDIR="$HOMEDIR/.config/hypr"
     STATEDIR="$dir/state"
@@ -73,8 +77,8 @@ sandbox() {
 
 unsandbox() {
     unset HOME OMAFAN_HYPR_CONFIG OMAFAN_HYPRCTL OMAFAN_STATE_DIR \
-        OMAFAN_DEFAULT_BINDINGS_DIR OMAFAN_STUB_MEM HOMEDIR HKDIR \
-        STATEDIR DEFAULTS || true
+        OMAFAN_DEFAULT_BINDINGS_DIR OMAFAN_STUB_MEM OMAFAN_CTL \
+        SANDBOXDIR HOMEDIR HKDIR STATEDIR DEFAULTS || true
 }
 
 # the eight chords in DESIGN.md section 7 order (pipe-joined)
@@ -296,6 +300,124 @@ sandbox '[]'
 assert_exit_code 2 "$KB" bogus
 assert_exit_code 2 "$KB"
 assert_exit_code 2 "$KB" --help
+unsandbox
+
+# ---------------------------------------------------------------------------
+# 11. helper-path defects (T06b D1-D4)
+# ---------------------------------------------------------------------------
+
+# helper_emit() -> the command field of every o.bind line in <file>
+block_cmds() {
+    grep '^o\.bind(' "$1" | sed -n 's/^o\.bind("[^"]*", "[^"]*", "\(.*\)")$/\1/p'
+}
+
+# 11a (D1): the block carries an absolute helper path that exists as an
+# executable inside the tempdir; no bare `omafan-ctl` token remains.
+sandbox '[]'
+SBOX="$SANDBOXDIR"
+mkdir -p "$SBOX/ctl"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$SBOX/ctl/omafan-ctl"
+chmod +x "$SBOX/ctl/omafan-ctl"
+OMAFAN_CTL="$SBOX/ctl/omafan-ctl"
+export OMAFAN_CTL
+
+assert_exit_code 0 "$KB" install
+assert_eq "0" "$(grep -cE '^o\.bind\("[^"]*", "[^"]*", "omafan-ctl ' "$OMAFAN_HYPR_CONFIG")" \
+    "no bare omafan-ctl token remains in the block"
+assert_eq "0" "$(grep -cE ' o\.bind\([^"]*, "[^"]*", "omafan-ctl' "$OMAFAN_HYPR_CONFIG")" \
+    "every helper call is an absolute path, not a PATH lookup"
+block_cmds "$OMAFAN_HYPR_CONFIG" | grep -E ' (preset|cycle) ' |
+while IFS= read -r cmd; do
+    assert_eq "0" "$(test -x "${cmd%% *}"; printf %s $?)" \
+        "helper path in the block is an executable: ${cmd%% *}"
+done
+unset OMAFAN_CTL
+unsandbox
+
+# 11b (D2): install refuses when OMAFAN_CTL points at a missing file;
+# target file untouched.
+sandbox '[]'
+printf 'untouched = true\n' > "$OMAFAN_HYPR_CONFIG"
+cp "$OMAFAN_HYPR_CONFIG" "$HOMEDIR/expected"
+OMAFAN_CTL="$SANDBOXDIR/ctl/missing-omafan-ctl"
+export OMAFAN_CTL
+out="$("$KB" install 2>&1)"
+assert_ne "0" "$?" "missing OMAFAN_CTL helper makes install fail"
+cmp -s "$HOMEDIR/expected" "$OMAFAN_HYPR_CONFIG"
+assert_eq "0" "$?" "refused install (missing helper) leaves the file untouched"
+assert_contains "$out" 'not an executable file' \
+    "refusal names the helper problem and the fix"
+unsandbox
+
+# 11c (D2): install refuses when OMAFAN_CTL contains a space.
+sandbox '[]'
+mkdir -p "$SANDBOXDIR/ctlspace dir"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$SANDBOXDIR/ctlspace dir/omafan-ctl"
+chmod +x "$SANDBOXDIR/ctlspace dir/omafan-ctl"
+printf 'untouched = true\n' > "$OMAFAN_HYPR_CONFIG"
+cp "$OMAFAN_HYPR_CONFIG" "$HOMEDIR/expected"
+OMAFAN_CTL="$SANDBOXDIR/ctlspace dir/omafan-ctl"
+export OMAFAN_CTL
+out="$("$KB" install 2>&1)"
+assert_ne "0" "$?" "helper path with a space makes install fail"
+cmp -s "$HOMEDIR/expected" "$OMAFAN_HYPR_CONFIG"
+assert_eq "0" "$?" "refused install (space in path) leaves the file untouched"
+assert_contains "$out" 'whitespace' \
+    "refusal names the unsafe whitespace in the helper path"
+unset OMAFAN_CTL
+unsandbox
+
+# 11d (D2): install refuses on a quote character too (defence in depth).
+sandbox '[]'
+mkdir -p "$SANDBOXDIR/ctl"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$SANDBOXDIR/ctl/omafan'quote"
+chmod +x "$SANDBOXDIR/ctl/omafan'quote"
+printf '' > "$OMAFAN_HYPR_CONFIG"
+OMAFAN_CTL="$SANDBOXDIR/ctl/omafan'quote"
+export OMAFAN_CTL
+out="$("$KB" install 2>&1)"
+assert_ne "0" "$?" "helper path with a quote makes install fail"
+assert_contains "$out" 'whitespace, a quote or a backslash' \
+    "refusal names the unquotable character"
+unset OMAFAN_CTL
+unsandbox
+
+# 11e (D3): status reports stale-path when the block on disk calls a helper
+# path different from the one that resolves now; re-install refreshes it.
+sandbox '[]'
+SBOX="$SANDBOXDIR"
+mkdir -p "$SBOX/ctla" "$SBOX/ctlb"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$SBOX/ctla/omafan-ctl"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$SBOX/ctlb/omafan-ctl"
+chmod +x "$SBOX/ctla/omafan-ctl" "$SBOX/ctlb/omafan-ctl"
+
+OMAFAN_CTL="$SBOX/ctla/omafan-ctl"
+export OMAFAN_CTL
+assert_exit_code 0 "$KB" install
+assert_contains "$(cat "$OMAFAN_HYPR_CONFIG")" "$SBOX/ctla/omafan-ctl" \
+    "the block names helper ctla as installed"
+
+OMAFAN_CTL="$SBOX/ctlb/omafan-ctl"
+out="$("$KB" status)"
+assert_exit_code 0 "$KB" status
+assert_contains "$out" 'stale-path' "status reports stale-path after the ctl path moved"
+assert_contains "$out" 're-run install' "the stale-path line names the fix"
+assert_contains "$(cat "$OMAFAN_HYPR_CONFIG")" "$SBOX/ctla/omafan-ctl" \
+    "status wrote nothing; the block still calls the old helper"
+
+assert_exit_code 0 "$KB" install
+assert_contains "$(cat "$OMAFAN_HYPR_CONFIG")" "$SBOX/ctlb/omafan-ctl" \
+    "re-running install refreshes the block to the current helper"
+first_helper="$(block_cmds "$OMAFAN_HYPR_CONFIG" |
+    grep -E ' (preset|cycle) ' | grep -o '^[^ ]*' | head -n 1)"
+assert_eq "$SBOX/ctlb/omafan-ctl" "$first_helper" \
+    "the refreshed block calls the new helper as its first token"
+if grep -q 'ctla/omafan-ctl' "$OMAFAN_HYPR_CONFIG" 2>/dev/null; then
+    assert_eq "0" "1" "old helper ctla must be gone after the refresh"
+else
+    assert_eq "0" "0" "old helper ctla is gone after the refresh"
+fi
+unset OMAFAN_CTL
 unsandbox
 
 summarize

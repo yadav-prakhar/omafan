@@ -18,11 +18,23 @@
 #   OMAFAN_HYPR_CONFIG   target file (default ~/.config/hypr/bindings.lua)
 #   OMAFAN_HYPRCTL       hyprctl command (default "hyprctl")
 #   OMAFAN_STATE_DIR     backup dir (default ~/.local/state/omafan-keybindings)
+#   OMAFAN_CTL           the omafan-ctl helper the block will call
+#                        (default: <plugin dir>/bin/omafan-ctl)
 #   OMAFAN_DEFAULT_BINDINGS_DIR  Omarchy default Lua tree
 #                        (default ${OMARCHY_PATH:-/usr/share/omarchy}/default/hypr/bindings)
 #
-# Exit codes: 0 ok; 1 install refused because of a conflicting binding, or the
-# compositor did not pick the block up after reload; 2 usage error.
+# The helper is resolved at install time (T06b D1): Hyprland runs a `bind
+# ... exec` command through a plain non-login shell and the plugin's bin/ is
+# not on PATH, so emitting a bare `omafan-ctl` would fail with "command not
+# found" at every key press while looking correctly installed. install
+# refuses (T06b D2) when the resolved helper is not an executable file or its
+# path carries whitespace, a quote or a backslash - the path is embedded in a
+# Lua string Hyprland hands to a shell, and a quoting bug there fails
+# silently at key-press time. Refusing loudly is the right trade.
+#
+# Exit codes: 0 ok; 1 install refused because of a conflicting binding, an
+# unusable helper, or the compositor not picking the block up after reload;
+# 2 usage error.
 
 set -euo pipefail
 
@@ -30,20 +42,31 @@ readonly PLUGIN_ID="io.github.yadav-prakhar.omafan"
 readonly BEGIN_MARK="-- BEGIN omafan"
 readonly END_MARK="-- END omafan"
 
-# DESIGN.md section 7 is frozen; the block below is its verbatim table.
-readonly BLOCK="$BEGIN_MARK
--- omafan fan keybindings (plugin $PLUGIN_ID)
+# DESIGN.md section 7 is frozen; the table below is its verbatim command
+# column, with the helper resolved to an absolute path (T06b D1) and the
+# panel toggle chord deliberately left on `omarchy-shell`, which IS on PATH.
+# BLOCK is built once the helper has been resolved (see main).
+
+# Absolute plugin root and the helper it ships; OMAFAN_CTL overrides for
+# tests and non-standard installs, mirroring OMAFAN_HYPRCTL.
+plugin_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ctl="${OMAFAN_CTL:-$plugin_dir/bin/omafan-ctl}"
+
+build_block() {
+    BLOCK="$BEGIN_MARK
+-- omafan fan keybindings (plugin $PLUGIN_ID, helper: $ctl)
 -- Remove with: ~/.config/omarchy/plugins/$PLUGIN_ID/bin/omafan-keybindings remove
 -- Managed by bin/omafan-keybindings; edits inside this block are overwritten.
 o.bind(\"SUPER + ALT + T\", \"omafan: toggle fan panel\", \"omarchy-shell omafan toggle\")
-o.bind(\"SUPER + ALT + A\", \"omafan: fans auto (firmware)\", \"omafan-ctl preset auto --notify\")
-o.bind(\"SUPER + ALT + O\", \"omafan: fans off (floor)\", \"omafan-ctl preset off --notify\")
-o.bind(\"SUPER + ALT + L\", \"omafan: fans low\", \"omafan-ctl preset low --notify\")
-o.bind(\"SUPER + ALT + M\", \"omafan: fans medium\", \"omafan-ctl preset med --notify\")
-o.bind(\"SUPER + ALT + H\", \"omafan: fans high\", \"omafan-ctl preset high --notify\")
-o.bind(\"SUPER + ALT + X\", \"omafan: fans full\", \"omafan-ctl preset full --notify\")
-o.bind(\"SUPER + ALT + C\", \"omafan: cycle fan presets\", \"omafan-ctl cycle --notify\")
+o.bind(\"SUPER + ALT + A\", \"omafan: fans auto (firmware)\", \"$ctl preset auto --notify\")
+o.bind(\"SUPER + ALT + O\", \"omafan: fans off (floor)\", \"$ctl preset off --notify\")
+o.bind(\"SUPER + ALT + L\", \"omafan: fans low\", \"$ctl preset low --notify\")
+o.bind(\"SUPER + ALT + M\", \"omafan: fans medium\", \"$ctl preset med --notify\")
+o.bind(\"SUPER + ALT + H\", \"omafan: fans high\", \"$ctl preset high --notify\")
+o.bind(\"SUPER + ALT + X\", \"omafan: fans full\", \"$ctl preset full --notify\")
+o.bind(\"SUPER + ALT + C\", \"omafan: cycle fan presets\", \"$ctl cycle --notify\")
 $END_MARK"
+}
 
 # The eight letter keys the block binds, in chord-table order; the per-chord
 # verdicts of `status` must line up with the block above. Exported for the awk
@@ -63,8 +86,26 @@ die() { # die <exit_code> <message>
     exit "$1"
 }
 
+# check_helper - install only (T06b D2). The helper path is embedded in a Lua
+# string Hyprland hands to a shell; an unusable helper is a silent failure at
+# key-press time, so install refuses loudly and writes nothing.
+check_helper() {
+    if ! [ -f "$ctl" ] || ! [ -x "$ctl" ]; then
+        die 1 "helper $ctl is not an executable file, but the emitted chords \
+would run it on every key press - set OMAFAN_CTL to the real bin/omafan-ctl \
+(or install the plugin) and run install again. Nothing was written."
+    fi
+    case "$ctl" in
+        *[[:space:]\"\'\\]*)
+            die 1 "helper path contains whitespace, a quote or a backslash \
+($ctl) - the path goes inside a Lua string that Hyprland hands to a shell and \
+cannot be quoted safely there - move the plugin to a space-free path (or set \
+OMAFAN_CTL) and run install again. Nothing was written." ;;
+    esac
+}
+
 usage() {
-    sed -n '2,35p' "$0" | sed 's/^# \{1\}//' | grep -v '^#' | grep -v '^$' >&2
+    sed -n '2,38p' "$0" | sed 's/^# \{1\}//' | grep -v '^#' | grep -v '^$' >&2
     exit 2
 }
 
@@ -173,6 +214,18 @@ on_disk_block() { # prints the BEGIN..END region of <file>, markers included
     ' "$1"
 }
 
+# on_disk_helper <file> -> the executable the installed block's preset/cycle
+# chords call first; empty when the block binds none of them. T06b D3: this
+# is how `status` detects that the plugin (or OMAFAN_CTL) has moved since the
+# block was written.
+on_disk_helper() {
+    on_disk_block "$1" |
+        grep '^o\.bind(' |
+        sed -n 's/^o\.bind("[^"]*", "[^"]*", "\(.*\)")$/\1/p' |
+        sed -n 's/^\([^[:space:]"]*\) \(preset\|cycle\) .*/\1/p' |
+        head -n 1
+}
+
 # write_file <path> <content-on-stdin> - atomic replace, 0644.
 write_file() {
     local target="$1" tmp
@@ -218,6 +271,8 @@ verify_live() {
 
 cmd_install() {
     local target="$OMAFAN_HYPR_CONFIG"
+    # Guard the helper before anything else: refusal must write nothing.
+    check_helper
     mkdir -p "$(dirname "$target")" \
         || die 1 "cannot create $(dirname "$target") - check the path and permissions"
 
@@ -242,6 +297,13 @@ Free them (or edit the user Lua) and run install again. Nothing was written."
         return 0
     fi
 
+    # A stale managed block (our helper path moved) must be replaced, not
+    # stacked: cut it first so exactly one omafan block ever exists.
+    local base="$existing"
+    if [ -n "$base" ] && has_block "$target"; then
+        base="$(remove_with_awk "$target")"
+    fi
+
     # Back up the pre-install file exactly once (first install only).
     if [ -n "$existing" ] && ! has_block "$target"; then
         mkdir -p "$OMAFAN_STATE_DIR" \
@@ -254,8 +316,8 @@ Free them (or edit the user Lua) and run install again. Nothing was written."
             || die 1 "cannot back up $target - fix permissions on $OMAFAN_STATE_DIR first"
     fi
 
-    # Fresh content: original file (if any) + separator + managed block.
-    local out="$existing"
+    # Fresh content: original file (if any, old block cut) + separator + block.
+    local out="$base"
     if [ -n "$out" ]; then
         case "$out" in
             *$'\n') : ;;
@@ -349,6 +411,19 @@ cmd_status() {
 
     printf 'target: %s\n' "$target"
     printf 'block: %s\n' "$state"
+    printf 'helper: %s\n' "$ctl"  # D3: print/status surface the resolved helper
+
+    # D3: an installed block that calls a helper path which no longer
+    # resolves means the plugin moved (or OMAFAN_CTL changed); the chords on
+    # disk would fire the old file. Name it and the fix.
+    if [ "$state" = "installed" ]; then
+        local disk_helper
+        disk_helper="$(on_disk_helper "$target")"
+        if [ -n "$disk_helper" ] && [ "$disk_helper" != "$ctl" ]; then
+            printf 'stale-path: the installed block calls %s, but %s resolves \
+now - re-run install to refresh the block\n' "$disk_helper" "$ctl"
+        fi
+    fi
 
     local conflicts
     conflicts="$(all_conflicts)"
@@ -376,6 +451,15 @@ main() {
     OMAFAN_STATE_DIR="${OMAFAN_STATE_DIR:-$HOME/.local/state/omafan-keybindings}"
     OMAFAN_DEFAULT_BINDINGS_DIR="${OMAFAN_DEFAULT_BINDINGS_DIR:-\
 ${OMARCHY_PATH:-/usr/share/omarchy}/default/hypr/bindings}"
+
+    # Resolve OMAFAN_CTL once; every subcommand needs the resolved value
+    # because `print`/`install` emit it into the block.
+    if [ -n "${OMAFAN_CTL:-}" ]; then
+        ctl="$OMAFAN_CTL"
+    else
+        ctl="$plugin_dir/bin/omafan-ctl"
+    fi
+    build_block
 
     [ $# -ge 1 ] || die 2 "usage: omafan-keybindings install|remove|status|print (-h for help)"
     case "$1" in
