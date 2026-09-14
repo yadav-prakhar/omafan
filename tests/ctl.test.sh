@@ -12,6 +12,12 @@
 # The fast path is held to section 4.1's values, not merely its types: with a
 # seeded state.json that carries t_eff_c, the document must render that number
 # (T04c D1) and uptime_s must equal polls x interval_s (T04c D2).
+#
+# T05b adds the T04d write-path guards: doctor's check set is twelve (the eleven
+# section 4.4 ids plus pkexec_write_path); a real runner with a custom runtime
+# dir is refused with exit 2 before it runs; a failing runner on the default
+# runtime dir exits 3; the privileged argv is bare (no `env` wrapper); and a
+# runner that never answers is bounded to exit 3 in under 25 s.
 set -uo pipefail
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -65,6 +71,56 @@ run_mode() {
 
 jget() { printf '%s' "$1" | jq -r "$2" 2>/dev/null; }
 argv_log() { cat -- "$RUN/argv.log" 2>/dev/null; }
+
+# ---------------------------------------------------------------------------
+# Privileged-write-path helpers (T04d)
+# ---------------------------------------------------------------------------
+
+# in_default_runtime <cmd...> - run a command with /run/afanctl bind-mounted to
+# this case's runtime dir inside a private user+mount namespace. T04d admits a
+# real runner only when the resolved runtime dir is afanctl's documented default,
+# so this is the one way to reach a runner at all. The mount lives only in the
+# namespace, so the live daemon is neither read nor written.
+in_default_runtime() {
+    unshare -rm bash -c 'mount --bind "$1" /run/afanctl || exit 90; shift; exec "$@"' \
+        _ "$RUN" "$@"
+}
+
+# expected_argv <verb> [rpm] - the exact privileged argv T04d requires:
+# [<runner>, <afanctl>, <verb>(, <rpm>)], nothing between runner and binary.
+expected_argv() {
+    if [ -n "${2:-}" ]; then
+        jq -cn --arg r "$CASE/bin/runner" --arg a "$FAKE" --arg v "$1" --arg x "$2" \
+            '[$r, $a, $v, $x]'
+    else
+        jq -cn --arg r "$CASE/bin/runner" --arg a "$FAKE" --arg v "$1" '[$r, $a, $v]'
+    fi
+}
+
+# assert_runner_argv <label> <document> - the no-env property: argv[1] is the
+# afanctl binary, never `env` and never a VAR=value assignment. A `env` wrapper
+# between runner and binary is the live T04d blocker: afanctl's polkit rule
+# re-checks the program realpath and the argv, answers NOT_HANDLED, and pkexec
+# falls back to a password prompt no script can answer.
+assert_runner_argv() {
+    local label="$1" doc="$2" verdict
+    verdict="$(printf '%s' "$doc" | jq -r --arg runner "$CASE/bin/runner" --arg ac "$FAKE" '
+        .argv
+        | ((.[0] == $runner)
+           and (.[1] == $ac)
+           and (.[2] == "hold" or .[2] == "observe")
+           and ([.[] | select(. == "env")] | length == 0)
+           and ([.[] | select(test("^[A-Za-z_][A-Za-z0-9_]*="))] | length == 0))
+        | if . then "clean" else "dirty" end' 2>/dev/null)"
+    assert_eq "clean" "$verdict" "$label"
+}
+
+# assert_runner_argv_exact <label> <expected-array> <document>
+assert_runner_argv_exact() {
+    local label="$1" expected="$2" doc="$3"
+    assert_json_eq "$expected" "$(printf '%s' "$doc" | jq -c '.argv')" "$label"
+    assert_runner_argv "$label (argv[1] is the binary, no env wrapper)" "$doc"
+}
 
 # ---------------------------------------------------------------------------
 # 0. syntax gate
@@ -160,11 +216,19 @@ assert_eq "Medium" "$(jget "$out" '.presets[3].label')" "med label"
 setup_case "$FIX/state-hold.json"
 out="$(run_mode observe doctor --json 2>/dev/null)"; rc=$?
 assert_eq "omafan.doctor.v1" "$(jget "$out" '.schema')" "doctor.schema is the frozen id"
-assert_eq "11" "$(jget "$out" '.checks | length')" "doctor emits the eleven fixed checks"
+assert_eq "12" "$(jget "$out" '.checks | length')" \
+    "doctor emits the twelve fixed checks (eleven section 4.4 + pkexec_write_path)"
 expected_ids="afanctl_present,afanctl_version,applesmc,coretemp,daemon_running,"
-expected_ids+="hw_limits,keybindings,pkexec_present,polkit_rule,shell_ipc,state_fresh"
+expected_ids+="hw_limits,keybindings,pkexec_present,pkexec_write_path,polkit_rule,"
+expected_ids+="shell_ipc,state_fresh"
 assert_eq "$expected_ids" "$(jget "$out" '[.checks[].id] | sort | join(",")')" \
-    "the check id set is exactly section 4.4"
+    "the check id set is exactly section 4.4 plus pkexec_write_path"
+assert_eq "1" "$(jget "$out" '[.checks[] | select(.id == "pkexec_write_path")] | length')" \
+    "the pkexec_write_path check is present"
+assert_eq "1" "$(jget "$out" '[.checks[] | select(.id == "pkexec_write_path" and (.status | test("^(PASS|WARN|FAIL)$")))] | length')" \
+    "pkexec_write_path status is one of PASS, WARN or FAIL"
+assert_eq "WARN" "$(jget "$out" '.checks[] | select(.id == "pkexec_write_path") | .status')" \
+    "pkexec_write_path is WARN under --pkexec none (T04d D4)"
 bad_status='[.checks[] | select(.status != "PASS"'
 bad_status+=' and .status != "WARN" and .status != "FAIL")] | length'
 assert_eq "0" "$(jget "$out" "$bad_status")" "every check status is PASS, WARN or FAIL"
@@ -254,32 +318,176 @@ assert_exit_code 2 ctl rpm 100001
 assert_exit_code 2 "$CTL"
 
 # ---------------------------------------------------------------------------
-# 9. exit 3: authorisation denied or cancelled
+# 9. the privileged runner gate (T04d)
+#    (a) a custom runtime dir with a real runner is refused before it runs
+#    (b) a failing runner on the default runtime dir exits 3
 # ---------------------------------------------------------------------------
 
+# (a) T04d D2: pkexec cannot carry a custom runtime dir (afanctl's polkit rule
+# pins the argv and pkexec sanitises the environment), so the write is refused
+# with a usage error before the runner is ever invoked.
 setup_case "$FIX/state-hold.json"
-cat > "$CASE/bin/pkexec" <<'EOF'
+cat > "$CASE/bin/runner" <<EOF
 #!/usr/bin/env bash
-# A polkit dismissal: pkexec reports 126 and writes to stderr.
+# The sentinel proves the refusal stopped the runner from being invoked at all.
+: > "$CASE/runner-was-called"
+exit 126
+EOF
+chmod +x "$CASE/bin/runner"
+out="$(FAKE_AFANCTL_MODE=hold "$CTL" preset med --afanctl "$FAKE" \
+    --pkexec "$CASE/bin/runner" --runtime-dir "$RUN" --json 2>/dev/null)"; rc=$?
+assert_eq 2 "$rc" "a real runner with a custom runtime dir is a usage error (T04d D2)"
+assert_eq "runtime_dir_unsupported" "$(jget "$out" '.error')" \
+    "the refusal names the unsupported runtime dir"
+assert_contains "$(jget "$out" '.message')" "--pkexec none" \
+    "the refusal names the tests/dev escape hatch"
+assert_eq "0" "$(test -e "$CASE/runner-was-called" && echo 1 || echo 0)" \
+    "the refused write never invoked the runner (sentinel absent)"
+assert_eq "0" "$(test -e "$RUN/argv.log" && echo 1 || echo 0)" \
+    "the refused write sent nothing to afanctl"
+
+# (b) the behaviour the old assertion reached for: a runner that fails on the
+# default runtime dir exits 3. Only the default runtime dir admits a real runner
+# (T04d D2), so this runs inside a private mount namespace with the seeded
+# fixture bound over /run/afanctl - never the live daemon. `release` is used
+# because auto can never trip the undercooling guard, so the runner is always
+# reached.
+setup_case "$FIX/state-hold.json"
+assert_exit_code 0 in_default_runtime true
+cat > "$CASE/bin/runner" <<'EOF'
+#!/usr/bin/env bash
 echo "Error executing command as another user: Request dismissed" >&2
 exit 126
 EOF
-chmod +x "$CASE/bin/pkexec"
-# Bypass ctl so its trailing `--pkexec none` cannot mask the stub; the stub's
-# path is absolute on purpose, mirroring a real pkexec the operator installed.
-run_denied() {
-    FAKE_AFANCTL_MODE=hold "$CTL" "$@" --afanctl "$FAKE" \
-        --pkexec "$CASE/bin/pkexec" --runtime-dir "$RUN"
-}
-assert_exit_code 3 run_denied preset med
+chmod +x "$CASE/bin/runner"
+out="$(in_default_runtime "$CTL" release --afanctl "$FAKE" \
+    --pkexec "$CASE/bin/runner" --json 2>/dev/null)"; rc=$?
+assert_eq 3 "$rc" "a dismissed runner exits 3 through the default runtime dir (T04d)"
+assert_eq "false" "$(jget "$out" '.ok')" "the authorisation refusal is ok:false"
+assert_eq "not_authorized" "$(jget "$out" '.error')" \
+    "the envelope names not_authorized"
 
-cat > "$CASE/bin/pkexec" <<'EOF'
+cat > "$CASE/bin/runner" <<'EOF'
 #!/usr/bin/env bash
 echo "Not authorized" >&2
 exit 1
 EOF
-chmod +x "$CASE/bin/pkexec"
-assert_exit_code 3 run_denied preset med
+chmod +x "$CASE/bin/runner"
+assert_exit_code 3 in_default_runtime "$CTL" release --afanctl "$FAKE" \
+    --pkexec "$CASE/bin/runner"
+
+# ---------------------------------------------------------------------------
+# 9c. T04d D1 regression guard: the privileged argv is bare
+#     [<runner>, <afanctl>, <verb>(, <rpm>)] - never `env`, never VAR=value
+# ---------------------------------------------------------------------------
+
+setup_case "$FIX/state-hold.json"
+cat > "$CASE/bin/runner" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = "env" ]; then exit 42; fi
+exit 0
+EOF
+chmod +x "$CASE/bin/runner"
+# Dry-run skips the runner gate, so a custom runtime dir may seed the state
+# without the namespace; it still composes the real runner argv.
+runner_dry_run() {
+    "$CTL" "$@" --afanctl "$FAKE" --pkexec "$CASE/bin/runner" --dry-run \
+        --runtime-dir "$RUN" 2>/dev/null
+}
+
+out="$(runner_dry_run preset auto)"
+assert_runner_argv_exact "preset auto builds [runner, afanctl, observe]" \
+    "$(expected_argv observe)" "$out"
+out="$(runner_dry_run preset off)"
+assert_runner_argv_exact "preset off builds [runner, afanctl, hold, 1200]" \
+    "$(expected_argv hold 1200)" "$out"
+out="$(runner_dry_run preset low)"
+assert_runner_argv_exact "preset low builds [runner, afanctl, hold, 2700]" \
+    "$(expected_argv hold 2700)" "$out"
+out="$(runner_dry_run preset med)"
+assert_runner_argv_exact "preset med builds [runner, afanctl, hold, 4200]" \
+    "$(expected_argv hold 4200)" "$out"
+out="$(runner_dry_run preset high)"
+assert_runner_argv_exact "preset high builds [runner, afanctl, hold, 5700]" \
+    "$(expected_argv hold 5700)" "$out"
+out="$(runner_dry_run preset full)"
+assert_runner_argv_exact "preset full builds [runner, afanctl, hold, 7200]" \
+    "$(expected_argv hold 7200)" "$out"
+out="$(runner_dry_run rpm 3000)"
+assert_runner_argv_exact "rpm builds [runner, afanctl, hold, 3000]" \
+    "$(expected_argv hold 3000)" "$out"
+out="$(runner_dry_run release)"
+assert_runner_argv_exact "release builds [runner, afanctl, observe]" \
+    "$(expected_argv observe)" "$out"
+# The seeded hold fixture holds med (4200), so cycle steps to high (5700).
+out="$(runner_dry_run cycle)"
+assert_runner_argv_exact "cycle builds [runner, afanctl, hold, 5700]" \
+    "$(expected_argv hold 5700)" "$out"
+assert_ne "env" "$(jget "$out" '.argv[1]')" "argv[1] is not env"
+assert_eq "0" "$(jget "$out" '[.argv[] | select(test("^[A-Za-z_][A-Za-z0-9_]*="))] | length')" \
+    "no argv element is a VAR=value assignment"
+
+# --dry-run with a real runner prints the bare argv and executes nothing.
+setup_case "$FIX/state-hold.json"
+cat > "$CASE/bin/runner" <<EOF
+#!/usr/bin/env bash
+: > "$CASE/runner-ran"
+exit 0
+EOF
+chmod +x "$CASE/bin/runner"
+out="$("$CTL" preset med --afanctl "$FAKE" --pkexec "$CASE/bin/runner" \
+    --dry-run --runtime-dir "$RUN" --json 2>/dev/null)"; rc=$?
+assert_eq 0 "$rc" "--dry-run with a real runner exits 0"
+assert_eq "true" "$(jget "$out" '.ok')" "--dry-run is a success document"
+assert_eq "$CASE/bin/runner" "$(jget "$out" '.argv[0]')" "--dry-run prints the runner"
+assert_eq "hold" "$(jget "$out" '.argv[2]')" "--dry-run prints the verb it would run"
+assert_eq "4200" "$(jget "$out" '.argv[3]')" "--dry-run prints the rpm it would hold"
+assert_eq "0" "$(test -e "$CASE/runner-ran" && echo 1 || echo 0)" \
+    "--dry-run with a real runner executes nothing"
+assert_eq "0" "$(test -e "$RUN/argv.log" && echo 1 || echo 0)" \
+    "--dry-run with a real runner writes no argv.log"
+
+# The guard proper: execute a write through a runner that rejects an `env`
+# wrapper and require success. On the live machine the wrapper makes pkexec
+# prompt for a password, so this must never pass by accident.
+setup_case "$FIX/state-hold.json"
+cat > "$CASE/bin/runner" <<'EOF'
+#!/usr/bin/env bash
+if [ "${1:-}" = "env" ]; then exit 42; fi
+exit 0
+EOF
+chmod +x "$CASE/bin/runner"
+out="$(in_default_runtime "$CTL" release --afanctl "$FAKE" \
+    --pkexec "$CASE/bin/runner" --json 2>/dev/null)"; rc=$?
+assert_eq 0 "$rc" "a write succeeds through a runner that rejects an env wrapper"
+assert_eq "true" "$(jget "$out" '.ok')" "the env-guarded write reports ok"
+assert_ne "env" "$(jget "$out" '.argv[1]')" "the executed argv[1] is not env"
+assert_eq "$FAKE" "$(jget "$out" '.argv[1]')" "the executed argv[1] is the afanctl binary"
+assert_eq "observe" "$(jget "$out" '.argv[2]')" "the executed argv[2] is the verb"
+
+# ---------------------------------------------------------------------------
+# 9d. T04d D3: the runner wait is bounded - a runner that never answers exits 3
+#     in well under 25 s (a hung polkit password prompt must not hang the caller)
+# ---------------------------------------------------------------------------
+
+setup_case "$FIX/state-hold.json"
+cat > "$CASE/bin/runner" <<'EOF'
+#!/usr/bin/env bash
+sleep 60
+exit 0
+EOF
+chmod +x "$CASE/bin/runner"
+started="$(date +%s)"
+out="$(in_default_runtime "$CTL" release --afanctl "$FAKE" \
+    --pkexec "$CASE/bin/runner" --json 2>/dev/null)"; rc=$?
+elapsed=$(( $(date +%s) - started ))
+assert_eq 3 "$rc" "a runner that never answers exits 3, not a hang"
+assert_eq "true" "$([ "$elapsed" -lt 25 ] && echo true || echo false)" \
+    "the bounded runner wait stays under 25 s (took ${elapsed}s)"
+assert_eq "authorisation_timeout" "$(jget "$out" '.error')" \
+    "the timeout envelope names authorisation_timeout"
+assert_contains "$(jget "$out" '.message')" "authorisation timed out" \
+    "the timeout message names the cause and the fix"
 
 # ---------------------------------------------------------------------------
 # 10. exit 4: afanctl missing or not executable
