@@ -277,8 +277,10 @@ Panel {
 
   // The undercooling confirmation (DESIGN.md 5.1): a hot-machine preset below
   // the current fan speed is sent only when the same preset is requested again
-  // within 10 s. The second attempt carries --force because the panel has
-  // confirmed deliberately — it is not a silent override.
+  // within 10 s. The second attempt carries the narrow --force-undercooling
+  // (REVIEW-R2 R2-6) because the panel has confirmed deliberately — it is not a
+  // silent override, and it must not double as an override for the degraded
+  // latch or the band check.
   function applyPreset(id) {
     // T09c D4: a preset press while a write is in flight is ignored, not
     // stacked, and not allowed to re-arm the undercooling confirmation.
@@ -293,7 +295,7 @@ Panel {
       }
       root.armedPresetId = ""
       armedExpire.stop()
-      root.sendCommand(["preset", id, "--force"])
+      root.sendCommand(["preset", id, "--force-undercooling"])
       return
     }
     root.sendCommand(["preset", id])

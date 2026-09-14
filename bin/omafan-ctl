@@ -66,6 +66,7 @@ output_mode="json" # json | human (JSON is the machine-readable default)
 want_full="false"
 want_dry_run="false"
 want_force="false"
+want_force_undercooling="false"
 want_notify="false"
 verb=""
 verb_args=()
@@ -117,8 +118,11 @@ GLOBALS:
                           env OMAFAN_PKEXEC)
   --json / --human        output format (default: json)
   --notify / --no-notify  desktop notification via notify-send when present
-  --force                 override the degraded/out-of-band/undercooling
+  --force                 override the degraded, out-of-band and undercooling
                           refusals on writes
+  --force-undercooling    override only the undercooling refusal (exit 8);
+                          the panel's heat confirmation uses this, so it cannot
+                          bypass the degraded latch or the hardware band
   --dry-run               print the argv that would run, then exit 0
 
 EXIT CODES:
@@ -535,6 +539,14 @@ write_prereqs() {
         fail_action 2 runtime_dir_unsupported \
             "pkexec cannot carry a custom runtime dir (afanctl's polkit rule pins the argv, and pkexec sanitises the environment); writes target afanctl's default $AC_DEFAULT_RUNTIME_DIR - unset --runtime-dir/OMAFAN_RUNTIME_DIR, or use --pkexec none for tests. Reads still read the directory you asked for ($runtime_dir)"
     fi
+    # REVIEW-R2 R2-7: the same reasoning applies to --config, which the runner
+    # argv cannot carry either. Silently writing against afanctl's default config
+    # after the user named another one is exactly the kind of quiet divergence
+    # this file refuses elsewhere; refuse loudly instead.
+    if [ "$pkexec_bin" != "none" ] && [ -n "$config_path" ]; then
+        fail_action 2 config_unsupported \
+            "pkexec cannot carry --config $config_path (afanctl's polkit rule pins the argv to the verb and its argument); the write would use afanctl's default config. Fix: unset --config for privileged writes, or use --pkexec none for tests. Reads still honour --config."
+    fi
     # A write with no readable state would fly blind: the degraded latch, the
     # band and the undercooling guard all hang off that state. Refuse.
     if ! read_state; then
@@ -564,7 +576,11 @@ write_prereqs() {
 
 assert_undercooling() {
     # $1 request label for the message, $2 requested rpm literal
-    if [ "$want_force" = "true" ] || [ "$want_dry_run" = "true" ]; then
+    # REVIEW-R2 R2-6: only the narrow undercooling override counts here, so a
+    # confirmation that was about heat can never bypass the degraded latch (6)
+    # or the band check (7); --force (the deliberate everything-override) does.
+    if [ "$want_force" = "true" ] || [ "$want_force_undercooling" = "true" ] \
+        || [ "$want_dry_run" = "true" ]; then
         return 0
     fi
     if is_undercooling_hot "$ST_T_EFF" "$ST_ACTUAL" "$2"; then
@@ -1197,6 +1213,9 @@ while [ $# -gt 0 ]; do
         --no-notify) want_notify="false" ;;
         --dry-run) want_dry_run="true" ;;
         --force) want_force="true" ;;
+        # REVIEW-R2 R2-6: the panel's heat confirmation uses this narrow flag so
+        # it cannot double as an override for the degraded latch or the band.
+        --force-undercooling) want_force_undercooling="true" ;;
         -h | --help)
             usage
             exit 0
@@ -1236,6 +1255,15 @@ done
 
 if [ "${#verb_args[@]}" -gt 0 ]; then
     verb="${verb_args[0]}"
+fi
+
+# REVIEW-R2 R2-8: every document this CLI emits is built with jq, so a missing
+# jq would otherwise surface as a raw "jq: command not found" (exit 127) with no
+# JSON envelope and no fix line. Refuse up front, in the documented error style
+# (the version verb needs no jq, so it stays usable).
+if [ "${verb:-}" != "version" ] && ! command -v jq >/dev/null 2>&1; then
+    printf 'omafan-ctl: jq is required but is not on PATH. Fix: install jq (pacman -S jq)\n' >&2
+    exit 1
 fi
 
 afanctl_prepare

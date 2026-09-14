@@ -25,8 +25,8 @@ know. The machine-level flight recorder with per-event evidence is
 | P2 | `bin/omafan-ctl` (glm high) — accepted after one amendment round (`cycle`), keybinding installer + suite (glm high), `Model.js` undercooling-guard amendment (deepseek). |
 | P3 | `BarWidget.qml` (deepseek), `KeyboardHelp.qml` (MiMo), `Panel.qml` (glm high). |
 | P4 | `tests/ctl.test.sh` (deepseek), live-suite scripts (deepseek), README/INSTALL/TROUBLESHOOTING (deepseek), architecture/safety/keys/testing/prior-art docs (deepseek), changelog + publishing inputs (MiMo). |
-| P5 | Two adversarial review rounds on the finished tree (glm 5.3, read-only). |
-| P6 | Live integration in the running shell, keybinding install + verify, hardware smoke test, git push, marketplace submission package, Obsidian note. |
+| P5 | Adversarial review rounds on the finished tree (glm 5.3, read-only): **T16 (safety/privilege/collision) delivered** — see below; **T15 (code vs contracts) produced no report** (its session ran to the end of the log window without writing `orchestration/REVIEW-R1.md`; it is re-runnable with `orchestration/dispatch.sh T15:opencode-go/glm-5.3:high`). |
+| P6 | Live integration in the running shell, keybinding install + verify, real hardware write through the fixed polkit path, git push, marketplace submission package, Obsidian notes. |
 
 ## Rulings that changed the frozen contracts
 
