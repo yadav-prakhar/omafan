@@ -1,0 +1,391 @@
+#!/usr/bin/env bash
+# bin/omafan-keybindings - install/remove/status the omafan Hyprland chord block.
+#
+# The block lands in ~/.config/hypr/bindings.lua between `-- BEGIN omafan`
+# and `-- END omafan` markers, using the Omarchy `o.bind(chord, description,
+# command)` helper form. install is refused when any of the eight chords is
+# already bound elsewhere - checked against the live compositor via
+# `hyprctl binds -j` and against the Lua sources on disk - so nothing the
+# operator already owns is ever silently shadowed (PRD K3, DESIGN.md section 7).
+#
+# Subcommands:
+#   install   write (or refresh) the managed block; refuses on any conflict
+#   remove    cut the managed block; exit 0 when there is nothing to remove
+#   status    print installed|not-installed|conflict plus per-chord verdicts
+#   print     print the block to stdout only; no files are touched
+#
+# Overrides (tests and non-standard setups only):
+#   OMAFAN_HYPR_CONFIG   target file (default ~/.config/hypr/bindings.lua)
+#   OMAFAN_HYPRCTL       hyprctl command (default "hyprctl")
+#   OMAFAN_STATE_DIR     backup dir (default ~/.local/state/omafan-keybindings)
+#   OMAFAN_DEFAULT_BINDINGS_DIR  Omarchy default Lua tree
+#                        (default ${OMARCHY_PATH:-/usr/share/omarchy}/default/hypr/bindings)
+#
+# Exit codes: 0 ok; 1 install refused because of a conflicting binding, or the
+# compositor did not pick the block up after reload; 2 usage error.
+
+set -euo pipefail
+
+readonly PLUGIN_ID="io.github.yadav-prakhar.omafan"
+readonly BEGIN_MARK="-- BEGIN omafan"
+readonly END_MARK="-- END omafan"
+
+# DESIGN.md section 7 is frozen; the block below is its verbatim table.
+readonly BLOCK="$BEGIN_MARK
+-- omafan fan keybindings (plugin $PLUGIN_ID)
+-- Remove with: ~/.config/omarchy/plugins/$PLUGIN_ID/bin/omafan-keybindings remove
+-- Managed by bin/omafan-keybindings; edits inside this block are overwritten.
+o.bind(\"SUPER + ALT + T\", \"omafan: toggle fan panel\", \"omarchy-shell omafan toggle\")
+o.bind(\"SUPER + ALT + A\", \"omafan: fans auto (firmware)\", \"omafan-ctl preset auto --notify\")
+o.bind(\"SUPER + ALT + O\", \"omafan: fans off (floor)\", \"omafan-ctl preset off --notify\")
+o.bind(\"SUPER + ALT + L\", \"omafan: fans low\", \"omafan-ctl preset low --notify\")
+o.bind(\"SUPER + ALT + M\", \"omafan: fans medium\", \"omafan-ctl preset med --notify\")
+o.bind(\"SUPER + ALT + H\", \"omafan: fans high\", \"omafan-ctl preset high --notify\")
+o.bind(\"SUPER + ALT + X\", \"omafan: fans full\", \"omafan-ctl preset full --notify\")
+o.bind(\"SUPER + ALT + C\", \"omafan: cycle fan presets\", \"omafan-ctl cycle --notify\")
+$END_MARK"
+
+# The eight letter keys the block binds, in chord-table order; the per-chord
+# verdicts of `status` must line up with the block above. Exported for the awk
+# scan, which reads them through ENVIRON.
+readonly OMAFAN_KEYS="T A O L M H X C"
+export OMAFAN_KEYS
+readonly OMAFAN_KEYCODES="27 28 32 38 43 46 50 54"
+export OMAFAN_KEYCODES
+
+# XKB keycodes of the eight letters (X27 T28 O32 H43 L46 M50 A38 C54): the
+# Lua sources may bind a physical key as `code:<n>`; digits are the known
+# Omarchy case (code:10-19), so a code: chord counts as a conflict only when
+# its number aliases one of ours.
+
+die() { # die <exit_code> <message>
+    printf 'omafan-keybindings: %s\n' "$2" >&2
+    exit "$1"
+}
+
+usage() {
+    sed -n '2,35p' "$0" | sed 's/^# \{1\}//' | grep -v '^#' | grep -v '^$' >&2
+    exit 2
+}
+
+# ---------------------------------------------------------------------------
+# Conflicts
+# ---------------------------------------------------------------------------
+
+# hyprctl_present -> 0 when the configured hyprctl exists
+hyprctl_present() {
+    command -v "$OMAFAN_HYPRCTL" >/dev/null 2>&1
+}
+
+# live_conflicts -> one "<key>\t<description>" line per live bind that collides
+# with one of our eight SUPER+ALT chords (modmask 72 = SUPER|ALT). Empty when
+# hyprctl is absent or unreadable; the Lua scan still protects the config.
+live_conflicts() {
+    hyprctl_present || return 0
+    "$OMAFAN_HYPRCTL" binds -j 2>/dev/null |
+        jq -r '.[]? | select(.modmask == 72) | "\(.key)\t\(.description // "")"' 2>/dev/null |
+        while IFS="$(printf '\t')" read -r key desc; do
+            ulc="$(printf '%s' "$key" | tr '[:lower:]' '[:upper:]')"
+            case " $OMAFAN_KEYS " in
+                *" $ulc "*)
+                    # Our own block shows up in the live bind list too; its
+                    # chord descriptions all start with "omafan:".
+                    case "$desc" in
+                        omafan:*) ;; # ours - not a conflict
+                        *) printf '%s\t%s\n' "$ulc" "$desc" ;;
+                    esac ;;
+            esac
+        done || true
+}
+
+# lua_chord_conflicts <dir> -> one chord string per line found in .lua files
+# directly under <dir>, skipping anything inside our own managed block.
+lua_chord_conflicts() {
+    local dir="$1"
+    [ -d "$dir" ] || return 0
+    find "$dir" -maxdepth 1 -name '*.lua' -type f -print0 2>/dev/null |
+        xargs -0 -r awk -v begin="$BEGIN_MARK" -v end="$END_MARK" '
+            $0 == begin { ours = 1; next }
+            $0 == end   { ours = 0; next }
+            ours { next }
+            {
+                line = $0
+                while (match(line, /"[^"]*"/)) {
+                    q = substr(line, RSTART + 1, RLENGTH - 2)
+                    line = substr(line, RSTART + RLENGTH)
+                    if (q !~ /^SUPER \+ ALT \+ /) continue
+                    key = substr(q, length("SUPER + ALT + ") + 1)
+                    # A code: chord is a conflict only when the keycode aliases
+                    # one of our eight letters (digits are code:10-19 on
+                    # Omarchy and never collide with us).
+                    if (key ~ /^code:[0-9]+$/) {
+                        code = substr(key, 6)
+                        if (" " ENVIRON["OMAFAN_KEYCODES"] " " ~ (" " code " ")) {
+                            print q
+                        }
+                    } else if (key ~ /^[A-Za-z]$/) {
+                        k = toupper(key)
+                        if (" " ENVIRON["OMAFAN_KEYS"] " " ~ (" " k " ")) {
+                            print q
+                        }
+                    }
+                }
+            }
+        ' || true
+}
+
+# all_conflicts -> combined human-readable conflict lines, deduplicated.
+all_conflicts() {
+    {
+        live_conflicts |
+            while IFS="$(printf '\t')" read -r key desc; do
+                printf 'SUPER + ALT + %s is already live-bound%s\n' \
+                    "$key" "${desc:+ to \"$desc\"}"
+            done
+        lua_chord_conflicts "$OMAFAN_DEFAULT_BINDINGS_DIR" |
+            while IFS= read -r chord; do
+                printf '%s is bound in the Omarchy defaults (%s)\n' \
+                    "$chord" "$OMAFAN_DEFAULT_BINDINGS_DIR"
+            done
+        lua_chord_conflicts "$(dirname "$OMAFAN_HYPR_CONFIG")" |
+            while IFS= read -r chord; do
+                printf '%s is bound in %s\n' \
+                    "$chord" "$(dirname "$OMAFAN_HYPR_CONFIG")"
+            done
+    } | sort -u
+}
+
+# ---------------------------------------------------------------------------
+# Block surgery
+# ---------------------------------------------------------------------------
+
+has_block() { # has_block <file> -> 0 when both our markers are on their own lines
+    # Both patterns start with `--`, so `grep -e` (not positional) is required.
+    [ -f "$1" ] && \
+        grep -qxF -e "$BEGIN_MARK" "$1" && grep -qxF -e "$END_MARK" "$1"
+}
+
+on_disk_block() { # prints the BEGIN..END region of <file>, markers included
+    awk -v begin="$BEGIN_MARK" -v end="$END_MARK" '
+        $0 == begin { ours = 1 }
+        ours { print }
+        $0 == end { exit }
+    ' "$1"
+}
+
+# write_file <path> <content-on-stdin> - atomic replace, 0644.
+write_file() {
+    local target="$1" tmp
+    tmp="$(mktemp "$target.omafan.XXXXXX")"
+    cat > "$tmp"
+    chmod 0644 "$tmp"
+    mv -f "$tmp" "$target"
+}
+
+# latest_backup -> prints the newest backup path, empty when none
+latest_backup() {
+    [ -d "$OMAFAN_STATE_DIR" ] || return 0
+    ls -1t "$OMAFAN_STATE_DIR"/bindings.lua.* 2>/dev/null | head -n 1 || true
+}
+
+# ---------------------------------------------------------------------------
+# Subcommands
+# ---------------------------------------------------------------------------
+
+cmd_print() {
+    printf '%s\n' "$BLOCK"
+}
+
+# verify_live - re-read hyprctl binds -j until every omafan description shows
+# up; exits 1 with a human message if it never does.
+verify_live() {
+    local want missing i
+    for i in 1 2 3 4 5; do
+        missing=0
+        while IFS= read -r want; do
+            if ! "$OMAFAN_HYPRCTL" binds -j 2>/dev/null |
+                jq -e --arg d "$want" \
+                    'any(.[]?; (.description // "") == $d)' >/dev/null 2>&1; then
+                missing=1
+            fi
+        done < <(printf '%s\n' "$BLOCK" | grep '^o\.bind(' | sed 's/o\.bind("[^"]*", "\([^"]*\)".*/\1/')
+        [ "$missing" -eq 0 ] && return 0
+        sleep 0.2
+    done
+    die 1 "hyprctl did not report the omafan chords after reload - run \
+'omafan-keybindings status' and 'hyprctl binds -j | grep omafan' to investigate"
+}
+
+cmd_install() {
+    local target="$OMAFAN_HYPR_CONFIG"
+    mkdir -p "$(dirname "$target")" \
+        || die 1 "cannot create $(dirname "$target") - check the path and permissions"
+
+    local conflicts
+    conflicts="$(all_conflicts)"
+    if [ -n "$conflicts" ]; then
+        printf '%s\n' "$conflicts" >&2
+        die 1 "refusing to install: the chords above are already bound elsewhere. \
+Free them (or edit the user Lua) and run install again. Nothing was written."
+    fi
+
+    local existing=""
+    [ -f "$target" ] && existing="$(cat "$target")"
+
+    # Idempotence: an already-current block must leave the file untouched.
+    if [ -n "$existing" ] && has_block "$target" && \
+        [ "$(on_disk_block "$target")" = "$BLOCK" ]; then
+        if hyprctl_present; then
+            "$OMAFAN_HYPRCTL" reload >/dev/null 2>&1 || true
+        fi
+        printf 'omafan keybindings already current in %s\n' "$target"
+        return 0
+    fi
+
+    # Back up the pre-install file exactly once (first install only).
+    if [ -n "$existing" ] && ! has_block "$target"; then
+        mkdir -p "$OMAFAN_STATE_DIR" \
+            || die 1 "cannot create backup dir $OMAFAN_STATE_DIR - pass OMAFAN_STATE_DIR"
+        local stamp
+        # GNU date gives nanoseconds, so two installs in one second never
+        # overwrite each other's backups.
+        stamp="$(date +%Y%m%d-%H%M%S%N)"
+        cp -p "$target" "$OMAFAN_STATE_DIR/bindings.lua.$stamp" \
+            || die 1 "cannot back up $target - fix permissions on $OMAFAN_STATE_DIR first"
+    fi
+
+    # Fresh content: original file (if any) + separator + managed block.
+    local out="$existing"
+    if [ -n "$out" ]; then
+        case "$out" in
+            *$'\n') : ;;
+            *) out="$out"$'\n' ;;
+        esac
+        out="$out"$'\n'
+    fi
+    out="$out$BLOCK"$'\n'
+    printf '%s\n' "$out" | write_file "$target"
+
+    if hyprctl_present; then
+        "$OMAFAN_HYPRCTL" reload >/dev/null 2>&1 || true
+        verify_live
+    else
+        printf 'warning: hyprctl not found, live reload check skipped; restart Hyprland (or log in again) for the chords to appear\n' >&2
+    fi
+    printf 'omafan keybindings installed in %s\n' "$target"
+}
+
+# remove_with_awk <file> - cut BEGIN..END plus the separator blank line that
+# directly precedes BEGIN when the block ends the file (that blank line is
+# ours: install always writes one). Output to stdout.
+remove_with_awk() {
+    awk -v begin="$BEGIN_MARK" -v end="$END_MARK" '
+        $0 == begin {
+            ours = 1
+            if (prev == "" && nlines > 0) {
+                # undo the recorded separator blank line
+                delete lines[nlines]
+                nlines--
+            }
+            next
+        }
+        ours { next }
+        $0 == end { ours = 0; next }
+        { nlines++; lines[nlines] = $0; prev = $0 }
+        END {
+            for (i = 1; i <= nlines; i++) print lines[i]
+        }
+    ' "$1"
+}
+
+cmd_remove() {
+    local target="$OMAFAN_HYPR_CONFIG"
+    if ! [ -f "$target" ] || ! has_block "$target"; then
+        printf 'omafan keybindings not installed in %s - nothing to remove\n' "$target"
+        return 0
+    fi
+
+    # Fast path: when the current file is exactly the pre-install backup plus
+    # our appended block, restoring the backup is byte-identical.
+    local restored=0 backup cand
+    backup="$(latest_backup)"
+    if [ -n "$backup" ]; then
+        cand="$(mktemp "${TMPDIR:-/tmp}/omafan-rm.XXXXXX")"
+        if [ -s "$backup" ]; then
+            cat "$backup" > "$cand"
+            printf '\n%s\n' "$BLOCK" >> "$cand"
+        else
+            printf '%s\n' "$BLOCK" > "$cand"
+        fi
+        if cmp -s "$cand" "$target"; then
+            cp -p -- "$backup" "$target"
+            restored=1
+        fi
+        # Backups are reused by design: a later install re-backs-up anyway.
+        rm -f "$cand"
+    fi
+
+    if [ "$restored" -eq 0 ]; then
+        local tmp
+        tmp="$(mktemp "$target.omafan.XXXXXX")"
+        remove_with_awk "$target" > "$tmp"
+        chmod 0644 "$tmp"
+        mv -f "$tmp" "$target"
+    fi
+
+    if hyprctl_present; then
+        "$OMAFAN_HYPRCTL" reload >/dev/null 2>&1 || true
+    fi
+    printf 'omafan keybindings removed from %s\n' "$target"
+}
+
+# cmd_status_<state>: prints target, block state, conflicts, per-chord verdicts.
+cmd_status() {
+    local target="$OMAFAN_HYPR_CONFIG"
+    local state="not-installed"
+    if has_block "$target"; then
+        state="installed"
+    fi
+
+    printf 'target: %s\n' "$target"
+    printf 'block: %s\n' "$state"
+
+    local conflicts
+    conflicts="$(all_conflicts)"
+    if [ -n "$conflicts" ]; then
+        printf 'status: conflict\n'
+        printf '%s\n' "$conflicts"
+        exit 1
+    fi
+
+    # Per-chord verdict: "omafan" when the block on disk binds it, else free
+    # (the live compositor has been consulted for real conflicts above).
+    local key
+    for key in $OMAFAN_KEYS; do
+        printf 'SUPER + ALT + %-2s %s\n' "$key" "$state"
+    done
+}
+
+# ---------------------------------------------------------------------------
+# Entry
+# ---------------------------------------------------------------------------
+
+main() {
+    OMAFAN_HYPR_CONFIG="${OMAFAN_HYPR_CONFIG:-$HOME/.config/hypr/bindings.lua}"
+    OMAFAN_HYPRCTL="${OMAFAN_HYPRCTL:-hyprctl}"
+    OMAFAN_STATE_DIR="${OMAFAN_STATE_DIR:-$HOME/.local/state/omafan-keybindings}"
+    OMAFAN_DEFAULT_BINDINGS_DIR="${OMAFAN_DEFAULT_BINDINGS_DIR:-\
+${OMARCHY_PATH:-/usr/share/omarchy}/default/hypr/bindings}"
+
+    [ $# -ge 1 ] || die 2 "usage: omafan-keybindings install|remove|status|print (-h for help)"
+    case "$1" in
+        -h|--help) usage ;;
+        install) shift; cmd_install "$@" ;;
+        remove) shift; cmd_remove "$@" ;;
+        status) shift; cmd_status "$@" ;;
+        print) shift; cmd_print "$@" ;;
+        *) die 2 "unknown subcommand '$1' - use install|remove|status|print" ;;
+    esac
+}
+
+main "$@"

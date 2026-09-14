@@ -274,3 +274,51 @@ function isStateStale(ageSeconds) {
   if (!isFinite(v) || v < 0) return true;
   return v > STALE_AFTER_S;
 }
+
+// DESIGN.md §5.1: on a hot machine a preset can command less airflow than the
+// firmware already delivers, so the first attempt must be confirmed. An
+// unreadable temperature, rpm or target is treated as "not hot", never as
+// "unsafe", so a missing sensor cannot deadlock the panel; this is why the
+// numeric guards below return false rather than true.
+function isUndercoolingHot(status, targetRpm) {
+  if (!status || typeof status !== "object") return false;
+  var thermal = status.thermal || {};
+  var fan = status.fan || {};
+  var temp = finite(thermal.t_eff_c);
+  var current = finite(fan.rpm);
+  var target = finite(targetRpm);
+  if (!isFinite(temp) || !isFinite(current) || !isFinite(target)) return false;
+  return temp >= 80 && target < current;
+}
+
+// The smallest airflow increase that still beats the firmware: the first preset
+// in §3 order whose rpm reaches the fan's current speed. Past the ladder
+// ceiling the only safe instruction left is the release preset, so say that
+// rather than name a preset that would slow the fan down.
+function undercoolingAlternative(status, currentRpm) {
+  var hardware = (status && status.hardware) || {};
+  var ladder = presetsFor(hardware.fan_min_rpm, hardware.fan_max_rpm);
+  for (var i = 0; i < ladder.length; i++) {
+    var preset = ladder[i];
+    if (preset.rpm === null) continue;
+    if (preset.rpm >= currentRpm) {
+      return preset.label + " (" + formatRpm(preset.rpm) + ")";
+    }
+  }
+  return "Auto (firmware)";
+}
+
+// One sentence carrying every fact needed to make an informed override: the
+// temperature, what the fan is doing now, what was requested, why it is unsafe
+// and what to pick instead (DESIGN.md §5.1). Null unless the guard fires.
+function undercoolingWarning(status, targetRpm) {
+  if (!isUndercoolingHot(status, targetRpm)) return null;
+  var temp = finite(status.thermal.t_eff_c);
+  var current = finite(status.fan.rpm);
+  var requested = finite(targetRpm);
+  var alternative = undercoolingAlternative(status, current);
+  return "CPU " + formatTemp(temp) + ", fan " + formatRpm(current) +
+    ": the requested " + formatRpm(requested) + " is below the firmware curve; " +
+    "press Enter again within 10 s to override, or pick " + alternative +
+    " or higher.";
+}

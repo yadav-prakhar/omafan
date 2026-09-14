@@ -14,12 +14,13 @@ fail_suites=0
 skip_suites=0
 failed_names=()
 
+# run_suite <label> <file-that-must-exist> <command...>
 run_suite() {
     local name="$1"
     local present="$2"
     shift 2
     if [[ ! -e "$present" ]]; then
-        printf 'SKIP  %-22s (not present yet)\n' "$name"
+        printf 'SKIP  %-22s (missing: %s)\n' "$name" "$present"
         skip_suites=$((skip_suites + 1))
         return 0
     fi
@@ -46,17 +47,17 @@ echo "repo: $repo"
 echo
 
 # 1. manifest + schema + repository layout (omarchy's own validator)
-run_suite "plugin-validate" bash tests/plugin-validate.sh tests/plugin-validate.sh
+run_suite "plugin-validate" tests/plugin-validate.sh bash tests/plugin-validate.sh
 # 2. manifest-level assertions we make ourselves
-run_suite "manifest" bash tests/manifest.test.sh tests/manifest.test.sh
+run_suite "manifest" tests/manifest.test.sh bash tests/manifest.test.sh
 # 3. pure logic of Model.js
-run_suite "model" node tests/model.test.mjs tests/model.test.mjs
+run_suite "model" tests/model.test.mjs node tests/model.test.mjs
 # 4. the privileged CLI against the afanctl fixture
-run_suite "ctl" bash tests/ctl.test.sh tests/ctl.test.sh
+run_suite "ctl" tests/ctl.test.sh bash tests/ctl.test.sh
 # 5. the keybinding block installer against a stubbed Hyprland
-run_suite "keybindings" bash tests/keybindings.test.sh tests/keybindings.test.sh
+run_suite "keybindings" tests/keybindings.test.sh bash tests/keybindings.test.sh
 # 6. QML lint against the installed shell
-run_suite "qml-lint" bash tests/qml-lint.sh tests/qml-lint.sh
+run_suite "qml-lint" tests/qml-lint.sh bash tests/qml-lint.sh
 
 echo
 echo "PASS suites ${pass_suites} / FAIL suites ${fail_suites} / SKIP ${skip_suites}"

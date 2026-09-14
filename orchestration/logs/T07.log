@@ -1,0 +1,812 @@
+=== dispatch T07 model=opencode-go/deepseek-v4.1-flash variant=default at 2026-09-15T03:39:01+05:30
+[0m
+> Sisyphus - ultraworker · deepseek-v4.1-flash
+[0m
+[0m→ [0mRead PRD.md
+[0m→ [0mRead orchestration/instructions/WORKER.md
+[0m→ [0mRead DESIGN.md
+I'll read the required files first.
+[0m→ [0mRead PLAN.md
+[0m→ [0mRead orchestration/tickets/T07.md
+Now let me check the repo state and the reference implementations.
+[0m
+[0m$ [0mls -la /home/prakhar/.config/omarchy/plugins/omaplug/ 2>/dev/null; echo "--- omarchy shell ---"; ls /usr/share/omarchy/shell/ 2>/dev/null; echo "--- repo shell dir? ---"; ls -la /home/prakhar/Work/tries/2026-09-15-omafan/shell/ 2>/dev/null
+total 2616
+drwxr-xr-x 1 prakhar prakhar     702 Sep 14 17:13 .
+drwxr-xr-x 1 prakhar prakhar     516 Sep 14 20:12 ..
+-rw-r--r-- 1 prakhar prakhar     475 Sep 14 17:13 AGENTS.md
+-rwxr-xr-x 1 prakhar prakhar    1055 Sep 14 17:13 auto-check-coordinator.sh
+-rw-r--r-- 1 prakhar prakhar    3646 Sep 14 17:13 BarWidget.qml
+drwxr-xr-x 1 prakhar prakhar     142 Sep 14 17:59 .git
+-rw-r--r-- 1 prakhar prakhar      89 Sep 14 17:13 .gitignore
+-rw-r--r-- 1 prakhar prakhar    1061 Sep 14 17:13 LICENSE
+-rw-r--r-- 1 prakhar prakhar     540 Sep 14 17:13 manifest.json
+-rwxr-xr-x 1 prakhar prakhar     869 Sep 14 17:13 marketplace-catalog.sh
+-rwxr-xr-x 1 prakhar prakhar    1027 Sep 14 17:13 nested-widget-toggle.sh
+drwxr-xr-x 1 prakhar prakhar      82 Sep 14 17:13 panel
+-rw-r--r-- 1 prakhar prakhar   84881 Sep 14 17:13 Panel.qml
+-rwxr-xr-x 1 prakhar prakhar    3034 Sep 14 17:13 plugin-state.sh
+-rw-r--r-- 1 prakhar prakhar  196570 Sep 14 17:13 preview_action.png
+-rw-r--r-- 1 prakhar prakhar  156881 Sep 14 17:13 preview_add.png
+-rw-r--r-- 1 prakhar prakhar  101812 Sep 14 17:13 preview_check-update.png
+-rw-r--r-- 1 prakhar prakhar  187938 Sep 14 17:13 preview_filter_2.png
+-rw-r--r-- 1 prakhar prakhar  201492 Sep 14 17:13 preview_filter.png
+-rw-r--r-- 1 prakhar prakhar  192650 Sep 14 17:13 preview_main.png
+-rw-r--r-- 1 prakhar prakhar 1476023 Sep 14 17:13 preview.png
+-rw-r--r-- 1 prakhar prakhar    4391 Sep 14 17:13 README.md
+-rw-r--r-- 1 prakhar prakhar     646 Sep 14 17:13 RELEASE_NOTES_1.5.1.md
+-rwxr-xr-x 1 prakhar prakhar   10342 Sep 14 17:13 runtime-state.py
+drwxr-xr-x 1 prakhar prakhar      46 Sep 14 17:13 skills
+drwxr-xr-x 1 prakhar prakhar     606 Sep 14 17:13 tests
+-rwxr-xr-x 1 prakhar prakhar    2807 Sep 14 17:13 update-helper.sh
+--- omarchy shell ---
+Commons
+plugins
+README.md
+services
+shell.qml
+Ui
+--- repo shell dir? ---
+[0m
+[0m$ [0mls -la /home/prakhar/Work/tries/2026-09-15-omafan/ && echo "--- tests ---" && ls -la /home/prakhar/Work/tries/2026-09-15-omafan/tests/ 2>/dev/null && echo "--- bin ---" && ls -la /home/prakhar/Work/tries/2026-09-15-omafan/bin/ 2>/dev/null && echo "--- orchestration ---" && ls -R /home/prakhar/Work/tries/2026-09-15-omafan/orchestration/ 2>/dev/null
+total 136
+drwxr-xr-x 1 prakhar prakhar   248 Sep 15 03:39 .
+drwxr-xr-x 1 prakhar prakhar   100 Sep 15 02:46 ..
+drwxr-xr-x 1 prakhar prakhar    56 Sep 15 03:35 bin
+-rw-r--r-- 1 prakhar prakhar 24852 Sep 15 03:31 DESIGN.md
+-rw-r--r-- 1 prakhar prakhar   158 Sep 15 03:16 DEVIATIONS.md
+drwxr-xr-x 1 prakhar prakhar     0 Sep 15 03:14 docs
+drwxr-xr-x 1 prakhar prakhar   176 Sep 15 03:27 .git
+-rw-r--r-- 1 prakhar prakhar     8 Sep 15 03:21 .gitignore
+-rw-r--r-- 1 prakhar prakhar 35149 Sep 15 03:14 LICENSE
+-rw-r--r-- 1 prakhar prakhar  1202 Sep 15 03:22 manifest.json
+-rw-r--r-- 1 prakhar prakhar 11583 Sep 15 03:28 Model.js
+drwxr-xr-x 1 prakhar prakhar    32 Sep 15 03:25 .omo
+drwxr-xr-x 1 prakhar prakhar   116 Sep 15 03:29 orchestration
+-rw-r--r-- 1 prakhar prakhar 27220 Sep 15 03:39 PLAN.md
+-rw-r--r-- 1 prakhar prakhar 16136 Sep 15 03:15 PRD.md
+-rw-r--r-- 1 prakhar prakhar   447 Sep 15 03:24 QUESTIONS.md
+drwxr-xr-x 1 prakhar prakhar    94 Sep 15 03:29 .recon
+drwxr-xr-x 1 prakhar prakhar   198 Sep 15 03:36 tests
+--- tests ---
+total 52
+drwxr-xr-x 1 prakhar prakhar   198 Sep 15 03:36 .
+drwxr-xr-x 1 prakhar prakhar   248 Sep 15 03:39 ..
+drwxr-xr-x 1 prakhar prakhar   170 Sep 15 03:24 fixtures
+-rwxr-xr-x 1 prakhar prakhar 11806 Sep 15 03:39 keybindings.test.sh
+drwxr-xr-x 1 prakhar prakhar    20 Sep 15 03:24 lib
+-rwxr-xr-x 1 prakhar prakhar  3216 Sep 15 03:26 manifest.test.sh
+-rw-r--r-- 1 prakhar prakhar 18589 Sep 15 03:28 model.test.mjs
+-rwxr-xr-x 1 prakhar prakhar   719 Sep 15 03:23 plugin-validate.sh
+-rwxr-xr-x 1 prakhar prakhar  4692 Sep 15 03:27 qml-lint.sh
+-rwxr-xr-x 1 prakhar prakhar  2117 Sep 15 03:22 run-all.sh
+--- bin ---
+total 56
+drwxr-xr-x 1 prakhar prakhar    56 Sep 15 03:35 .
+drwxr-xr-x 1 prakhar prakhar   248 Sep 15 03:39 ..
+-rwxr-xr-x 1 prakhar prakhar 39884 Sep 15 03:37 omafan-ctl
+-rwxr-xr-x 1 prakhar prakhar 15051 Sep 15 03:38 omafan-keybindings
+--- orchestration ---
+/home/prakhar/Work/tries/2026-09-15-omafan/orchestration/:
+dispatch.sh
+instructions
+LEDGER.md
+live-install.sh
+logs
+tickets
+
+/home/prakhar/Work/tries/2026-09-15-omafan/orchestration/instructions:
+WORKER.md
+
+/home/prakhar/Work/tries/2026-09-15-omafan/orchestration/logs:
+_summary.txt
+T01.log
+T02b.log
+T02.log
+T03.log
+T04.log
+T06.log
+T07.log
+T08.log
+
+/home/prakhar/Work/tries/2026-09-15-omafan/orchestration/tickets:
+T01.md
+T02b.md
+T02.md
+T03.md
+T04.md
+T05.md
+T06.md
+T07.md
+T08.md
+T09.md
+T10.md
+T11.md
+T12.md
+T13.md
+[0m
+[0m→ [0mRead orchestration/logs/T07.log
+[0m→ [0mRead /home/prakhar/.config/omarchy/plugins/omaplug/BarWidget.qml
+[0m→ [0mRead tests/qml-lint.sh
+[0m→ [0mRead /usr/share/omarchy/shell/Ui/BarWidget.qml
+[0m→ [0mRead /usr/share/omarchy/shell/Ui/WidgetButton.qml
+[0m→ [0mRead Model.js
+[0m
+[0m$ [0mfind /usr/share/omarchy/shell/plugins -maxdepth 3 -name '*.qml' | sort; echo "=== bar widgets ==="; ls -R /usr/share/omarchy/shell/plugins 2>/dev/null | head -80
+/usr/share/omarchy/shell/plugins/agents/Agent.qml
+/usr/share/omarchy/shell/plugins/agents/Main.qml
+/usr/share/omarchy/shell/plugins/agents/Panel.qml
+/usr/share/omarchy/shell/plugins/background/Background.qml
+/usr/share/omarchy/shell/plugins/bar/Bar.qml
+/usr/share/omarchy/shell/plugins/bar/indicators/Dictation.qml
+/usr/share/omarchy/shell/plugins/bar/indicators/Dnd.qml
+/usr/share/omarchy/shell/plugins/bar/indicators/NightLight.qml
+/usr/share/omarchy/shell/plugins/bar/indicators/Reminder.qml
+/usr/share/omarchy/shell/plugins/bar/indicators/ScreenRecording.qml
+/usr/share/omarchy/shell/plugins/bar/indicators/StayAwake.qml
+/usr/share/omarchy/shell/plugins/bar/widgets/ActiveWindow.qml
+/usr/share/omarchy/shell/plugins/bar/widgets/Indicators.qml
+/usr/share/omarchy/shell/plugins/bar/widgets/KeyboardLayout.qml
+/usr/share/omarchy/shell/plugins/bar/widgets/Microphone.qml
+/usr/share/omarchy/shell/plugins/bar/widgets/Spacer.qml
+/usr/share/omarchy/shell/plugins/bar/widgets/SystemUpdate.qml
+/usr/share/omarchy/shell/plugins/bar/widgets/Tray.qml
+/usr/share/omarchy/shell/plugins/bar/widgets/Workspaces.qml
+/usr/share/omarchy/shell/plugins/clipboard/Clipboard.qml
+/usr/share/omarchy/shell/plugins/dev-gallery/GalleryPanel.qml
+/usr/share/omarchy/shell/plugins/emojis/Emojis.qml
+/usr/share/omarchy/shell/plugins/image-picker/ImagePicker.qml
+/usr/share/omarchy/shell/plugins/lock/LockView.qml
+/usr/share/omarchy/shell/plugins/lock/Service.qml
+/usr/share/omarchy/shell/plugins/menu/BarWidget.qml
+/usr/share/omarchy/shell/plugins/menu/Menu.qml
+/usr/share/omarchy/shell/plugins/notifications/components/NotificationCard.qml
+/usr/share/omarchy/shell/plugins/notifications/Service.qml
+/usr/share/omarchy/shell/plugins/osd/Osd.qml
+/usr/share/omarchy/shell/plugins/panels/audio/Panel.qml
+/usr/share/omarchy/shell/plugins/panels/bluetooth/Panel.qml
+/usr/share/omarchy/shell/plugins/panels/clock/BarWidget.qml
+/usr/share/omarchy/shell/plugins/panels/clock/Panel.qml
+/usr/share/omarchy/shell/plugins/panels/disk-speedtest/Panel.qml
+/usr/share/omarchy/shell/plugins/panels/dropbox/DropboxIcon.qml
+/usr/share/omarchy/shell/plugins/panels/dropbox/Panel.qml
+/usr/share/omarchy/shell/plugins/panels/dropbox/Service.qml
+/usr/share/omarchy/shell/plugins/panels/monitor/Panel.qml
+/usr/share/omarchy/shell/plugins/panels/network/Panel.qml
+/usr/share/omarchy/shell/plugins/panels/power/Panel.qml
+/usr/share/omarchy/shell/plugins/panels/speedtest/Panel.qml
+/usr/share/omarchy/shell/plugins/panels/tailscale/Panel.qml
+/usr/share/omarchy/shell/plugins/panels/tailscale/Service.qml
+/usr/share/omarchy/shell/plugins/panels/tailscale/TailscaleIcon.qml
+/usr/share/omarchy/shell/plugins/panels/weather/BarWidget.qml
+/usr/share/omarchy/shell/plugins/panels/weather/Panel.qml
+/usr/share/omarchy/shell/plugins/panels/wifiqr/Panel.qml
+/usr/share/omarchy/shell/plugins/polkit/PolkitAgent.qml
+/usr/share/omarchy/shell/plugins/reminders/ReminderFlow.qml
+/usr/share/omarchy/shell/plugins/services/battery/Service.qml
+/usr/share/omarchy/shell/plugins/services/idle/Service.qml
+/usr/share/omarchy/shell/plugins/services/media/BarWidget.qml
+/usr/share/omarchy/shell/plugins/services/media/Service.qml
+/usr/share/omarchy/shell/plugins/services/nightlight/Service.qml
+=== bar widgets ===
+/usr/share/omarchy/shell/plugins:
+agents
+background
+bar
+clipboard
+dev-gallery
+emojis
+image-picker
+lock
+menu
+notifications
+osd
+panels
+polkit
+README.md
+reminders
+services
+
+/usr/share/omarchy/shell/plugins/agents:
+Agent.qml
+assets
+Main.qml
+manifest.json
+Panel.qml
+README.md
+
+/usr/share/omarchy/shell/plugins/agents/assets:
+claude.svg
+codex-light.svg
+codex.svg
+fireworks.svg
+
+/usr/share/omarchy/shell/plugins/background:
+Background.qml
+manifest.json
+
+/usr/share/omarchy/shell/plugins/bar:
+BarModel.js
+Bar.qml
+indicators
+manifest.json
+README.md
+widgets
+
+/usr/share/omarchy/shell/plugins/bar/indicators:
+Dictation.qml
+Dnd.qml
+NightLight.qml
+Reminder.qml
+ScreenRecording.qml
+StayAwake.qml
+
+/usr/share/omarchy/shell/plugins/bar/widgets:
+ActiveWindow.manifest.json
+ActiveWindow.qml
+Indicators.manifest.json
+Indicators.qml
+KeyboardLayout.manifest.json
+KeyboardLayoutModel.js
+KeyboardLayout.qml
+Microphone.manifest.json
+Microphone.qml
+Spacer.manifest.json
+Spacer.qml
+SystemUpdate.manifest.json
+SystemUpdate.qml
+Tray.manifest.json
+TrayModel.js
+Tray.qml
+Workspaces.manifest.json
+Workspaces.qml
+
+/usr/share/omarchy/shell/plugins/clipboard:
+capture.sh
+ClipboardHistory.js
+Clipboard.qml
+manifest.json
+
+/usr/share/omarchy/shell/plugins/dev-gallery:
+GalleryPanel.qml
+[0m
+[0m$ [0mls /usr/share/omarchy/shell/Ui/ /usr/share/omarchy/shell/Commons/
+/usr/share/omarchy/shell/Commons/:
+BorderGeometry.js
+Border.qml
+Color.qml
+qmldir
+Style.qml
+Util.qml
+
+/usr/share/omarchy/shell/Ui/:
+BarIconButton.qml
+BarIndicator.qml
+BarWidget.qml
+BorderOverlay.qml
+BorderSurface.qml
+ButtonGroup.qml
+Button.qml
+ConfirmDialog.qml
+CursorSurface.qml
+Dropdown.qml
+KeyboardPanel.qml
+MultiSelect.qml
+NumberField.qml
+OpticalGlyph.qml
+PanelActionButton.qml
+PanelController.qml
+PanelHero.qml
+PanelKeyCatcher.qml
+Panel.qml
+PanelSectionHeader.qml
+PanelSeparator.qml
+PanelSlider.qml
+PanelToolTip.qml
+PluginBarApi.qml
+PointerMoveGate.qml
+PopupCard.qml
+qmldir
+ScreenMoveRemap.qml
+SearchableDropdown.qml
+SpeedTestOverlay.qml
+TextField.qml
+Toggle.qml
+ToggleSwitch.qml
+WidgetButton.qml
+[0m
+[0m→ [0mRead /usr/share/omarchy/shell/plugins/panels/weather/BarWidget.qml
+[0m→ [0mRead /usr/share/omarchy/shell/plugins/panels/clock/BarWidget.qml
+[0m✗ [0mRead orchestration/QUESTIONS.md failed
+[91m[1mError: [0mFile not found: /home/prakhar/Work/tries/2026-09-15-omafan/orchestration/QUESTIONS.md
+[0m→ [0mRead orchestration/tickets/T09.md
+[0m→ [0mRead DEVIATIONS.md
+[0m→ [0mRead QUESTIONS.md
+[0m→ [0mRead orchestration/LEDGER.md
+[0m
+[0m$ [0mls -la /home/prakhar/Work/tries/2026-09-15-omafan/.recon/ /home/prakhar/Work/tries/2026-09-15-omafan/.omo/ 2>/dev/null
+/home/prakhar/Work/tries/2026-09-15-omafan/.omo/:
+total 0
+drwxr-xr-x 1 prakhar prakhar  32 Sep 15 03:25 .
+drwxr-xr-x 1 prakhar prakhar 248 Sep 15 03:39 ..
+drwxr-xr-x 1 prakhar prakhar 280 Sep 15 03:28 run-continuation
+
+/home/prakhar/Work/tries/2026-09-15-omafan/.recon/:
+total 124
+drwxr-xr-x 1 prakhar prakhar     94 Sep 15 03:29 .
+drwxr-xr-x 1 prakhar prakhar    248 Sep 15 03:39 ..
+-rw-r--r-- 1 prakhar prakhar 103959 Sep 15 03:11 binds.json
+-rw-r--r-- 1 prakhar prakhar   9100 Sep 15 03:11 bound-chords.txt
+-rw-r--r-- 1 prakhar prakhar   5645 Sep 15 03:13 fan-plugins.json
+drwxr-xr-x 1 prakhar prakhar     28 Sep 15 03:29 shots
+[0m
+[0m$ [0mgrep -rn "wheelMoved" /usr/share/omarchy/shell/plugins/ /usr/share/omarchy/shell/Ui/ 2>/dev/null | head -30; echo "=== temperature/fan glyphs ==="; grep -rniE "thermometer|fan|cpu|temperature" /usr/share/omarchy/shell/Commons/Style.qml /usr/share/omarchy/shell/Commons/Color.qml 2>/dev/null | head -20
+/usr/share/omarchy/shell/Ui/WidgetButton.qml:33:  signal wheelMoved(int delta)
+/usr/share/omarchy/shell/Ui/WidgetButton.qml:117:    onWheel: function(wheel) { root.wheelMoved(wheel.angleDelta.y) }
+=== temperature/fan glyphs ===
+[0m
+[0m$ [0mgrep -rn "udb\|\\\\u[ef][0-9a-f]" /usr/share/omarchy/shell/plugins/*/*.qml /usr/share/omarchy/shell/plugins/*/*/*.qml 2>/dev/null | head -30; echo "=== Style.qml head ==="; sed -n '1,120p' /usr/share/omarchy/shell/Commons/Style.qml
+/usr/share/omarchy/shell/plugins/dev-gallery/GalleryPanel.qml:506:                    { key: "iconSmall",    size: Style.font.iconSmall,    sample: "\uf004 \uf005 \uf02d" },
+/usr/share/omarchy/shell/plugins/dev-gallery/GalleryPanel.qml:507:                    { key: "icon",         size: Style.font.icon,         sample: "\uf004 \uf005 \uf02d" },
+/usr/share/omarchy/shell/plugins/dev-gallery/GalleryPanel.qml:508:                    { key: "iconLarge",    size: Style.font.iconLarge,    sample: "\uf004 \uf005 \uf02d" }
+/usr/share/omarchy/shell/plugins/menu/BarWidget.qml:15:    text: "\ue900"
+/usr/share/omarchy/shell/plugins/menu/Menu.qml:278:      icon: "\udb81\udc0b",
+/usr/share/omarchy/shell/plugins/polkit/PolkitAgent.qml:278:        text: "\udb80\ude37"
+/usr/share/omarchy/shell/plugins/polkit/PolkitAgent.qml:295:          text: "\uf023"
+/usr/share/omarchy/shell/plugins/bar/widgets/SystemUpdate.qml:59:    text: "\uf021"
+/usr/share/omarchy/shell/plugins/bar/widgets/Tray.qml:272:          text: "\uf053"
+/usr/share/omarchy/shell/plugins/bar/widgets/Tray.qml:354:          text: "\uf053"
+/usr/share/omarchy/shell/plugins/bar/widgets/Tray.qml:487:            iconText: "\uf08d"
+/usr/share/omarchy/shell/plugins/bar/widgets/Tray.qml:502:            iconText: "\uf06e"
+/usr/share/omarchy/shell/plugins/bar/widgets/Tray.qml:692:                text: menuRow.modelData.checkState === Qt.Checked ? "\uf00c" : ""
+=== Style.qml head ===
+pragma Singleton
+import QtQuick
+import Quickshell
+import Quickshell.Io
+
+// Shared structural style tokens for the shell. Color is the palette
+// singleton; Style holds everything else themes can influence — corner
+// rounding, gap to screen edges, state affordances, spacing, typography
+// scale, and bar dimensions.
+//
+// `cornerRadius` mirrors Hyprland's `decoration:rounding`. `gapsOut` is
+// half of Hyprland's `general:gaps_out` — Hyprland's value works well as
+// a window-to-window gap but feels too cavernous when used as the
+// distance from a panel/notification to the screen edge, so the shell
+// halves it. Themes and user Hyprland config own those values; the
+// shell picks them up by re-running `hyprctl getoption` on startup and
+// after theme IPC applies a theme.
+//
+// Typography, spacing, and bar size come from theme/shell.toml.
+// `[font] base-size` is the rem root; every `Style.font.<token>` derives
+// from it via the scale multipliers below unless the theme pins that
+// specific token. `[spacing] scale` multiplies shared margins, gaps,
+// padding, controls, and panel dimensions while preserving each component's
+// proportions; by default it also tracks `base-size`. `[bar]
+// size-horizontal` / `size-vertical` set the cross-axis dimension for
+// top/bottom and left/right bars at the default 12px font size; by default
+// those dimensions scale with `base-size` so larger fonts don't clip.
+QtObject {
+  id: root
+
+  property int cornerRadius: 0
+  property int gapsOut: 5
+
+  // ---------------------------------------------------------- state tokens
+  //
+  // Shared interactive-state tokens for every reusable surface in the kit.
+  // The vocabulary:
+  //   normal       — idle control chrome
+  //   hover-cursor — mouse hover OR panel keyboard cursor (`hasCursor`)
+  //   selected     — persistent chosen/current state
+  //   focus        — actual Qt activeFocus, defaulting to hover-cursor
+  //
+  // Each state has a color token plus fill/border alphas. Color tokens
+  // may be palette roles (`foreground`, `accent`, `urgent`, `background`)
+  // or hex colors. Set a state's border width to 0 to drop that border.
+  property var styleOverrides: ({})
+
+  function styleRawNum(key) {
+    var v = styleOverrides[key]
+    var n = Number(v)
+    return isFinite(n) ? n : null
+  }
+
+  function styleNum(key, fallback) {
+    var n = styleRawNum(key)
+    return n === null ? fallback : n
+  }
+
+  function styleAlpha(key, fallback) {
+    return Util.clampAlpha(styleNum(key, fallback))
+  }
+
+  function styleString(key, fallback) {
+    var v = styleOverrides[key]
+    if (typeof v !== "string") return fallback
+    v = v.replace(/^\s+|\s+$/g, "")
+    return v.length > 0 ? v : fallback
+  }
+
+  readonly property string normalColorToken: styleString("normal-color", "foreground")
+  readonly property string hoverColorToken: styleString("hover-cursor-color", "foreground")
+  readonly property string selectedColorToken: styleString("selected-color", "foreground")
+  readonly property string pressedColorToken: styleString("pressed-color", hoverColorToken)
+  readonly property string focusColorToken: styleString("focus-color", hoverColorToken)
+  readonly property string selectionColorToken: styleString("selection-color", "foreground")
+
+  readonly property int normalBorderWidth: Math.max(0, Math.round(styleNum("normal-border-width", 1)))
+  readonly property int hoverBorderWidth: Math.max(0, Math.round(styleNum("hover-cursor-border-width", normalBorderWidth)))
+  readonly property int selectedBorderWidth: Math.max(0, Math.round(styleNum("selected-border-width", 0)))
+  readonly property int focusBorderWidth: Math.max(0, Math.round(styleNum("focus-border-width", hoverBorderWidth)))
+
+  readonly property real normalFillAlpha:    styleAlpha("normal-fill-alpha", 0.04)
+  readonly property real hoverFillAlpha:     styleAlpha("hover-cursor-fill-alpha", 0.08)
+  readonly property real selectedFillAlpha:  styleAlpha("selected-fill-alpha", 0.18)
+  readonly property real pressedFillAlpha:   styleAlpha("pressed-fill-alpha", 0.22)
+  readonly property real focusFillAlpha:     styleAlpha("focus-fill-alpha", hoverFillAlpha)
+  readonly property real selectionFillAlpha: styleAlpha("selection-fill-alpha", 0.35)
+
+  readonly property real normalBorderAlpha:   styleAlpha("normal-border-alpha", 0.4)
+  readonly property real hoverBorderAlpha:    styleAlpha("hover-cursor-border-alpha", 0.25)
+  readonly property real selectedBorderAlpha: styleAlpha("selected-border-alpha", 1.0)
+  readonly property real focusBorderAlpha:    styleAlpha("focus-border-alpha", hoverBorderAlpha)
+
+  function colorFromHex(value, fallback) {
+    var s = String(value || "").replace(/^\s+|\s+$/g, "")
+    var shortHex = s.match(/^#([0-9A-Fa-f]{3})$/)
+    if (shortHex) {
+      var sh = shortHex[1]
+      return Qt.rgba(
+        parseInt(sh.charAt(0) + sh.charAt(0), 16) / 255,
+        parseInt(sh.charAt(1) + sh.charAt(1), 16) / 255,
+        parseInt(sh.charAt(2) + sh.charAt(2), 16) / 255,
+        1)
+    }
+    var hex = s.match(/^#([0-9A-Fa-f]{6})([0-9A-Fa-f]{2})?$/)
+    if (!hex) return fallback
+    var h = hex[1]
+    return Qt.rgba(
+      parseInt(h.substr(0, 2), 16) / 255,
+      parseInt(h.substr(2, 2), 16) / 255,
+      parseInt(h.substr(4, 2), 16) / 255,
+      hex[2] ? parseInt(hex[2], 16) / 255 : 1)
+  }
+
+  function resolveStateColor(token, foreground, accent, urgent, fallback) {
+    var fb = fallback || foreground || Color.foreground
+    var s = String(token || "").replace(/^\s+|\s+$/g, "")
+    var role = s.toLowerCase()
+    if (role === "foreground" || role === "text") return foreground || Color.foreground
+    if (role === "accent") return accent || Color.accent
+[0m
+[0m$ [0mfc-list 2>/dev/null | grep -iE "nerd|mono" | head -10; echo "=== hb-shape? ==="; command -v hb-shape; echo "=== bar font ==="; grep -rn "fontFamily\|font.family" /usr/share/omarchy/shell/plugins/bar/Bar.qml | head; echo "=== theme font ==="; grep -rn "font" /usr/share/omarchy/theme/shell.toml 2>/dev/null | head; ls /usr/share/omarchy/themes 2>/dev/null | head
+/usr/share/fonts/noto/NotoSansMono-Light.ttf: Noto Sans Mono,Noto Sans Mono Light:style=Light,Regular
+/usr/share/fonts/TTF/MesloLGSDZNerdFontMono-Bold.ttf: MesloLGSDZ Nerd Font Mono:style=Bold
+/usr/share/fonts/gsfonts/NimbusMonoPS-BoldItalic.otf: Nimbus Mono PS:style=Bold Italic
+/usr/share/fonts/TTF/MesloLGLNerdFontMono-Italic.ttf: MesloLGL Nerd Font Mono:style=Italic
+/usr/share/fonts/TTF/MesloLGMNerdFontMono-Italic.ttf: MesloLGM Nerd Font Mono:style=Italic
+/usr/share/fonts/TTF/MesloLGMDZNerdFont-Regular.ttf: MesloLGMDZ Nerd Font:style=Regular
+/usr/share/fonts/TTF/MesloLGMDZNerdFontPropo-Bold.ttf: MesloLGMDZ Nerd Font Propo:style=Bold
+/usr/share/fonts/TTF/MesloLGSNerdFontPropo-Italic.ttf: MesloLGS Nerd Font Propo:style=Italic
+/usr/share/fonts/ttf-ia-writer/iAWriterMonoS-Italic.ttf: iA Writer Mono S:style=Italic
+/usr/share/fonts/TTF/MesloLGMDZNerdFont-Bold.ttf: MesloLGMDZ Nerd Font:style=Bold
+=== hb-shape? ===
+=== bar font ===
+68:  // Resolves through fontconfig at paint time (Style.font.family defaults
+71:  property string fontFamily: Style.font.family
+130:    api.fontFamily = Qt.binding(function() { return root.fontFamily })
+1342:          font.family: root.fontFamily
+=== theme font ===
+catppuccin
+catppuccin-latte
+ethereal
+everforest
+flexoki-light
+gruvbox
+hackerman
+kanagawa
+last-horizon
+lumon
+[0m
+[0m$ [0mgrep -rn "uf863\|f863\|ude10\|fan" /usr/share/omarchy/shell/ 2>/dev/null | grep -v Binary | head -20; echo "=== afanctl repo glyphs ==="; grep -rniE "uf863|ude10|glyph|icon" /home/prakhar/Work/tries/2026-09-14-a1708-fanctl/README.md 2>/dev/null | head
+...output truncated...
+
+Full output saved to: /home/prakhar/.local/share/opencode/tool-output/tool_0a1f86172001UEfgkwNkIPQXck
+
+=== afanctl repo glyphs ===
+[0m
+[0m$ [0mfor cp in f863 f0210; do echo "=== cp $cp ==="; fc-list ":charset=${cp}" family 2>/dev/null | sort -u | head -8; done
+=== cp f863 ===
+Font Awesome 7 Free,Font Awesome 7 Free Solid
+=== cp f0210 ===
+JetBrainsMono Nerd Font,JetBrainsMono NF
+MesloLGLDZ Nerd Font
+MesloLGLDZ Nerd Font Mono
+MesloLGLDZ Nerd Font Propo
+MesloLGL Nerd Font
+MesloLGL Nerd Font Mono
+MesloLGL Nerd Font Propo
+MesloLGMDZ Nerd Font
+[0m
+[0m$ [0mgrep -rn "family" /usr/share/omarchy/shell/Commons/Style.qml | head; echo "=== shell.toml ==="; find / -name "shell.toml" -path "*omarchy*" 2>/dev/null | head; echo; for f in $(find / -name "shell.toml" -path "*omarchy*" 2>/dev/null | head -3); do echo "--- $f"; grep -iE "font|family" "$f" | head; done
+268:  // family stays system-wide.
+271:  // The concrete family `monospace` resolves to right now, e.g.
+272:  // "JetBrainsMono Nerd Font". Bind `font.family` to `fontFamily` (so the
+313:  // OMARCHY_MENU_FONT override for users who want a different family on the
+322:    readonly property string family: root.fontFamily
+460:  // Resolve the fontconfig alias to a concrete family name. `omarchy font
+469:    command: ["fc-match", "-f", "%{family[0]}", "monospace"]
+=== shell.toml ===
+/home/prakhar/.config/omarchy/shell.toml
+/home/prakhar/.local/state/omarchy/current/theme/shell.toml
+
+--- /home/prakhar/.config/omarchy/shell.toml
+[font]
+--- /home/prakhar/.local/state/omarchy/current/theme/shell.toml
+# Cross-axis size at font base-size 12. size-horizontal is the height of
+# scale-with-font enabled, these grow/shrink with [font] base-size.
+scale-with-font  = true
+# dimensions; components keep their proportions. With scale-with-font
+# enabled, those dimensions grow/shrink with [font] base-size too. Per-token
+scale-with-font = true
+[font]
+# base-size is the rem root for the type scale. Every Style.font.<token>
+[0m
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && grep -rn "sendCommand\|command function\|nudge\|panelItem\." --include="*.md" --include="*.qml" --include="*.js" . 2>/dev/null | grep -v "^./orchestration/logs" | head -30
+./orchestration/tickets/T07.md:13:  panel, wheel = ±100 rpm through the panel's command function (never direct);
+./orchestration/tickets/T09.md:11:  tests; every write goes through one `sendCommand(argv)` helper that (a)
+./DESIGN.md:295:  readonly property bool opened            // panelItem.opened
+./DESIGN.md:307:  must go through the panel's command function so its banners/debounce apply.
+./PLAN.md:221:  panel, wheel = ±100 rpm through the panel's command function (never direct);
+./PLAN.md:247:  tests; every write goes through one `sendCommand(argv)` helper that (a)
+[0m
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && grep -rn "T07\|BarWidget" orchestration/LEDGER.md orchestration/logs/_summary.txt 2>/dev/null | head; echo "=== summary ==="; cat orchestration/logs/_summary.txt 2>/dev/null | head -40
+orchestration/LEDGER.md:7:- 2026-09-15T03:35Z orchestrator wave1 verified — `omarchy plugin validate .` (FAIL: BarWidget.qml missing, expected until P3), `node tests/model.test.mjs` → PASS 124 / FAIL 0, `bash -n` all shell OK, `tests/qml-lint.sh` → SKIP, fake-afanctl manual transcript (status/hold/observe/below-min/refuse-live-dir) correct — T01, T02, T03 ACCEPTED (T01's validate gate deferred to P3 by design; T03's fixture refuses the live /run/afanctl dir, which is stronger than asked).
+orchestration/LEDGER.md:10:- 2026-09-15T03:36Z orchestrator wrote tests/manifest.test.sh and tests/run-all.sh (T14, orchestrator-owned) — manifest: PASS 22 / FAIL 3 (3 failures are the not-yet-written BarWidget.qml/Panel.qml/README.md, expected until P3/P4).
+=== summary ===
+[0m
+[0m$ [0mgrep -n "findPanelWidget\|closeForPopoutSwitch\|popoutSwitchClosing\|requestPopout\|togglePanel\|\.opened" /usr/share/omarchy/shell/plugins/bar/Bar.qml | head -40
+220:    root.requestPopout(owner)
+258:      _requestPopout: function(owner) { root.requestPluginPopout(key, owner) },
+542:  function requestPopout(owner) {
+545:      if ("closeForPopoutSwitch" in activePopout) activePopout.closeForPopoutSwitch()
+638:        if (typeof item.open !== "function" || typeof item.close !== "function" || item.opened === undefined) continue
+726:  function findPanelWidget(pluginId) {
+735:      if (typeof item.open !== "function" || typeof item.close !== "function" || item.opened === undefined) continue
+736:      candidates.push({ slot: slot, screenName: slotScreenName(slot), opened: item.opened === true })
+745:    var item = findPanelWidget(pluginId)
+752:    var item = findPanelWidget(pluginId)
+759:    var item = findPanelWidget(pluginId)
+760:    return !!item && item.opened === true
+[0m
+[0m$ [0mcat /usr/share/omarchy/shell/Ui/qmldir | head -60; echo "=== user shell.toml ==="; cat /home/prakhar/.config/omarchy/shell.toml
+module qs.Ui
+
+BarIndicator 1.0 BarIndicator.qml
+BarIconButton 1.0 BarIconButton.qml
+BarWidget 1.0 BarWidget.qml
+BorderOverlay 1.0 BorderOverlay.qml
+BorderSurface 1.0 BorderSurface.qml
+Button 1.0 Button.qml
+ButtonGroup 1.0 ButtonGroup.qml
+ConfirmDialog 1.0 ConfirmDialog.qml
+CursorSurface 1.0 CursorSurface.qml
+Dropdown 1.0 Dropdown.qml
+KeyboardPanel 1.0 KeyboardPanel.qml
+MultiSelect 1.0 MultiSelect.qml
+NumberField 1.0 NumberField.qml
+OpticalGlyph 1.0 OpticalGlyph.qml
+Panel 1.0 Panel.qml
+PanelActionButton 1.0 PanelActionButton.qml
+PanelController 1.0 PanelController.qml
+PanelKeyCatcher 1.0 PanelKeyCatcher.qml
+PanelHero 1.0 PanelHero.qml
+PanelSectionHeader 1.0 PanelSectionHeader.qml
+PanelSeparator 1.0 PanelSeparator.qml
+PanelSlider 1.0 PanelSlider.qml
+PanelToolTip 1.0 PanelToolTip.qml
+PluginBarApi 1.0 PluginBarApi.qml
+PointerMoveGate 1.0 PointerMoveGate.qml
+ScreenMoveRemap 1.0 ScreenMoveRemap.qml
+PopupCard 1.0 PopupCard.qml
+SearchableDropdown 1.0 SearchableDropdown.qml
+SpeedTestOverlay 1.0 SpeedTestOverlay.qml
+TextField 1.0 TextField.qml
+Toggle 1.0 Toggle.qml
+ToggleSwitch 1.0 ToggleSwitch.qml
+WidgetButton 1.0 WidgetButton.qml
+=== user shell.toml ===
+[font]
+base-size = 12
+[0m
+[0m→ [0mRead /usr/share/omarchy/shell/plugins/bar/Bar.qml[90m [offset=525, limit=50][0m
+[0m→ [0mRead /usr/share/omarchy/shell/plugins/bar/Bar.qml[90m [offset=720, limit=50][0m
+[0m
+[0m$ [0mgrep -n "showTooltip\|tooltipText\|Text.PlainText\|StyledText" /usr/share/omarchy/shell/plugins/bar/Bar.qml | head -30
+88:  property string tooltipText: ""
+254:      _showTooltip: function(target, text) { root.showTooltip(target, text) },
+408:    tooltipText = ""
+1115:  function showTooltip(target, text) {
+1135:      tooltipText = pendingTooltipText
+1289:      visible: root.tooltipShown && root.tooltipTarget !== null && root.tooltipText !== "" && root.targetBelongsToWindow(root.tooltipTarget, barWindow)
+1338:          textFormat: Text.PlainText
+1340:          text: root.tooltipText
+2040:    tooltipText: outputTooltip || String(setting("tooltip", ""))
+[0m
+[0m← [0mWrite BarWidget.qml
+Wrote file successfully.
+[0m
+Now I have everything I need. Writing the file.
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && tests/qml-lint.sh; echo "RC=$?"
+PASS qml-lint: 2 file(s) clean; 15 expected non-fatal warning(s) about qs.* members
+RC=0
+[0m
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && echo "--- grep prohibited ---"; grep -nE 'Process|pkexec|exec' BarWidget.qml; echo "grep_rc=$?"; echo "--- trailing whitespace ---"; grep -nE ' +$' BarWidget.qml; echo "ws_rc=$?"; echo "--- long lines ---"; awk 'length>100 {print FILENAME":"FNR": "length}' BarWidget.qml; echo "--- last byte ---"; tail -c 1 BarWidget.qml | od -c | head -1
+--- grep prohibited ---
+grep_rc=1
+--- trailing whitespace ---
+ws_rc=1
+--- long lines ---
+BarWidget.qml:28: 113
+--- last byte ---
+0000000  \n
+[0m
+[0m← [0mEdit BarWidget.qml
+Index: /home/prakhar/Work/tries/2026-09-15-omafan/BarWidget.qml
+===================================================================
+--- /home/prakhar/Work/tries/2026-09-15-omafan/BarWidget.qml
++++ /home/prakhar/Work/tries/2026-09-15-omafan/BarWidget.qml
+@@ -23,10 +23,14 @@
+   if (value && value.status && value.status.schema === "omafan.status.v1") return value.status
+   return value
+ }
+ 
+-readonly property var fanRpm: root.statusDoc && root.statusDoc.fan ? root.statusDoc.fan.rpm : null
+-readonly property var cpuTemp: root.statusDoc && root.statusDoc.thermal ? root.statusDoc.thermal.t_eff_c : null
++readonly property var fanRpm: root.statusDoc && root.statusDoc.fan
++  ? root.statusDoc.fan.rpm
++  : null
++readonly property var cpuTemp: root.statusDoc && root.statusDoc.thermal
++  ? root.statusDoc.thermal.t_eff_c
++  : null
+ 
+ // A value the daemon did not report must never be shown as a number; the
+ // label then falls back to the glyph instead of claiming "0 rpm".
+ readonly property bool hasRpm: root.isUsable(root.fanRpm)
+
+[0m
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && ls *.qml && echo "--- lint ---" && tests/qml-lint.sh; echo "RC=$?"
+BarWidget.qml
+KeyboardHelp.qml
+--- lint ---
+PASS qml-lint: 2 file(s) clean; 15 expected non-fatal warning(s) about qs.* members
+RC=0
+[0m
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && echo "--- validate ---" && omarchy plugin validate .; echo "RC=$?"; echo "--- grep prohibited ---"; grep -nE 'Process|pkexec|exec' BarWidget.qml; echo "grep_rc=$?"; echo "--- style ---"; awk 'length>100 {print FILENAME":"FNR": "length}' BarWidget.qml; grep -nE ' +$' BarWidget.qml; echo "wc:"; wc -l BarWidget.qml
+--- validate ---
+RC=0
+--- grep prohibited ---
+grep_rc=1
+--- style ---
+wc:
+170 BarWidget.qml
+[0m
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && echo "=== concrete bar font ==="; fc-match -f '%{family[0]}\n' monospace; echo "=== md-fan (f0210) coverage ==="; fc-list ":charset=f0210" family | sort -u | grep -i jetbrains | head -2; echo "=== import/type wiring ==="; grep -nE '^import|^BarWidget|moduleName|panelLoader|IpcHandler|Quickshell\.Io|signals' BarWidget.qml
+=== concrete bar font ===
+MesloLGL Nerd Font
+=== md-fan (f0210) coverage ===
+JetBrainsMono Nerd Font,JetBrainsMono NF
+=== import/type wiring ===
+1:import QtQuick
+2:import qs.Ui
+3:import "Model.js" as Model
+11:BarWidget {
+13:  moduleName: "io.github.yadav-prakhar.omafan"
+91:    var target = panelLoader.item
+137:    id: panelLoader
+[0m
+[0m→ [0mRead tests/run-all.sh
+Gates pass. Let me gather evidence and check the shared suite.
+[0m
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && echo "=== does the resolved bar font carry md-fan? ==="; fc-list ":family=MesloLGL Nerd Font:charset=f0210" family | sort -u; echo "=== full hardware-free suite ==="; tests/run-all.sh; echo "RC=$?"
+=== does the resolved bar font carry md-fan? ===
+MesloLGL Nerd Font
+=== full hardware-free suite ===
+omafan test suite — 2026-09-15T03:42:03+05:30
+repo: /home/prakhar/Work/tries/2026-09-15-omafan
+
+SKIP  plugin-validate        (not present yet)
+SKIP  manifest               (not present yet)
+SKIP  model                  (not present yet)
+SKIP  ctl                    (not present yet)
+SKIP  keybindings            (not present yet)
+SKIP  qml-lint               (not present yet)
+
+PASS suites 0 / FAIL suites 0 / SKIP 6
+RC=0
+[0m
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && echo "=== plugin-validate direct ==="; bash tests/plugin-validate.sh; echo "RC=$?"; echo; echo "=== manifest test (may fail on other missing files) ==="; bash tests/manifest.test.sh 2>&1 | tail -20; echo "RC=${PIPESTATUS[0]}"
+=== plugin-validate direct ===
+--- omarchy plugin validate /home/prakhar/Work/tries/2026-09-15-omafan ---
+--- plugin-validate: OK ---
+PASS plugin-validate
+RC=0
+
+=== manifest test (may fail on other missing files) ===
+  FAIL: Panel.qml exists
+  FAIL: README present
+manifest: PASS 23 / FAIL 2
+RC=
+[0m
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && grep -n "BarWidget" tests/manifest.test.sh
+46:eq "entryPoints.barWidget" "$(j .entryPoints.barWidget)" "BarWidget.qml"
+50:check "BarWidget.qml exists" test -f BarWidget.qml
+[0m
+[0m→ [0mRead BarWidget.qml
+T07 implemented. Final report:
+
+```
+TICKET: T07
+FILES: BarWidget.qml:170
+
+GATES:
+  tests/qml-lint.sh -> PASS qml-lint: 2 file(s) clean; 15 expected non-fatal
+    warning(s) about qs.* members (RC=0)
+  omarchy plugin validate . -> RC=0 ("--- plugin-validate: OK ---")
+  bash tests/plugin-validate.sh -> "PASS plugin-validate" (RC=0)
+  grep -nE 'Process|pkexec|exec' BarWidget.qml -> no match (grep RC=1)
+  awk 'length>100' BarWidget.qml -> empty; grep -nE ' +$' -> empty; file ends \n
+
+EVIDENCE:
+  Wiring: imports QtQuick, qs.Ui, "Model.js" as Model; moduleName =
+    "io.github.yadav-prakhar.omafan"; Loader{active:true; visible:false;
+    source:Qt.resolvedUrl("Panel.qml")} with injectPanel()/onBarChanged/
+    onSettingsChanged; forwards opened/popoutSwitchClosing/open/close/
+    togglePanel/closeForPopoutSwitch. No IpcHandler, no Quickshell.Io.
+  Glyph: fc-match -f '%{family[0]}' monospace -> MesloLGL Nerd Font;
+    fc-list ":family=MesloLGL Nerd Font:charset=f0210" family -> present, so
+    the md-fan glyph ("\udb80\ude10", U+F0210) paints in the real bar font.
+  Integration: bash tests/manifest.test.sh -> manifest: PASS 23 / FAIL 2; the
+    only failures are "Panel.qml exists" (T09) and "README present" (T11). The
+    BarWidget.qml assertions (manifest.test.sh:46,50) now pass (was 22/3).
+  PlainText: our strings reach Text.PlainText twice — WidgetButton.qml:77
+    (label) and Bar.qml:1338 (tooltip) — so no extra Text element was needed.
+
+DECISIONS:
+  - Status comes from panelItem.status, the panel's parsed state (DESIGN §6.2
+    state list), normalised to accept either the raw omafan.status.v1 document
+    or Model.parseStatus()'s {ok,status} wrapper. The bar runs no poller of its
+    own: T07 forbids writes and DESIGN §6.1 gives the widget no command child.
+  - Every gesture that changes state goes through the panel's command function
+    (DESIGN §6.1 "must go through the panel's command function"): wheel sends
+    sendCommand(["rpm", "<n>"]), right-click on a hold sends
+    sendCommand(["release"]); both guarded with typeof === "function" so a
+    missing panel no-ops instead of throwing. sendCommand(args) is called with
+    the omafan-ctl arguments after the program name, the panel prepending its
+    ctlPath/env (T09, DESIGN R4).
+  - Wheel base = hold.rpm while holdActive, else Model.presetRpm("med",...),
+    then Model.snapRpm(...,100) (DESIGN §6.1, §3).
+  - Tint: button.active = status.hold.active === true, useActiveColor true
+    (DESIGN §6.1, §4.1 hold.active derivation).
+  - Tooltip = "Fan <formatRpm> · CPU <formatTemp> · <modeTone>", or
+    "Fan control" before any panel status (DESIGN §5 formatters, §6.1 shape).
+  - show enum: unknown/empty degrades to the documented default temp; missing
+    numbers show the glyph rather than a fake "—"; vertical bars show the glyph
+    only, matching the shell's own text widgets (shell README, Orientation).
+
+OPEN:
+  - Live load / qs log scan is the orchestrator's step only: worker rules forbid
+    writing under ~/.config/omarchy, so I could not install/rescan the plugin.
+  - Cross-ticket coupling to confirm with T09: sendCommand(args) takes the
+    arguments after the ctl path, and its `status` property holds the parsed
+    document (or the {ok,status} wrapper). If T09 chose another shape, only
+    applyToPanel() and statusDoc need changing. I did not add an
+    orchestration/QUESTIONS.md entry because this ticket (and the operator
+    instruction) limits edits to BarWidget.qml — please forward this note.
+  - Harness defect, not mine: tests/run-all.sh reports SKIP for all six suites
+    because run_suite treats $2 as the "present" path while callers pass the
+    interpreter (`run_suite "plugin-validate" bash tests/plugin-validate.sh`),
+    so `-e bash` is false. That gate currently executes nothing.
+```

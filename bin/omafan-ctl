@@ -1,0 +1,1042 @@
+#!/usr/bin/env bash
+# bin/omafan-ctl - the only omafan component that talks to afanctl.
+#
+# Implements DESIGN.md section 4 (verbs, globals, env, exit codes, JSON
+# schemas, dry-run, notify, degraded/stale/absent handling) and section 5.1
+# (the undercooling guard, exit 8).
+#
+# Safety posture:
+#   - Read verbs (status/presets/doctor) NEVER run pkexec; afanctl status is
+#     granted to wheel users in a local active session by afanctl's own
+#     polkit rule, so reads need no privilege runner at all.
+#   - Write verbs run pkexec (unless --pkexec none, for tests/dev). The
+#     runtime dir travels as AFANCTL_RUNTIME_DIR (orchestrator ruling R2:
+#     afanctl takes its runtime dir from the environment only) - passed
+#     through `pkexec env` because pkexec scrubs the caller's environment.
+#   - Nothing here writes /sys, /etc, /usr or /run/afanctl. The only file
+#     written outside the runtime dir is the hardware-limit cache at
+#     $XDG_RUNTIME_DIR/omafan/hw.json (fallback /tmp/omafan-<uid>/hw.json).
+#   - Every failure exits non-zero: a human line naming the problem and the
+#     fix goes to stderr and (JSON mode) the error envelope to stdout.
+#   - No eval, no unquoted expansions; scratch files only via mktemp + trap.
+
+set -euo pipefail
+
+readonly OMAFAN_CTL_VERSION="1.0.0"
+readonly STATUS_SCHEMA="omafan.status.v1"
+readonly PRESETS_SCHEMA="omafan.presets.v1"
+readonly ACTION_SCHEMA="omafan.action.v1"
+readonly DOCTOR_SCHEMA="omafan.doctor.v1"
+readonly STATE_SCHEMA="afanctl.state.v1"
+readonly STATE_FAN_MAX_INPUT=100000
+# Staleness of state.json is max(5 s, 3 x poll interval). The poll interval is
+# not in state.json and the daemon default is 1 s, so the 5 s floor wins.
+readonly STALE_AFTER_S=5
+readonly CACHE_TTL_S=86400 # hardware-limit cache lifetime (section 4.1: 24 h)
+
+# Globals; every one is overridable by flag in any position, and by env where
+# DESIGN.md documents it.
+afanctl_bin="${OMAFAN_AFANCTL:-afanctl}"
+runtime_dir="${OMAFAN_RUNTIME_DIR:-/run/afanctl}"
+pkexec_bin="${OMAFAN_PKEXEC:-pkexec}"
+config_path=""
+output_mode="json" # json | human (JSON is the machine-readable default)
+want_full="false"
+want_dry_run="false"
+want_force="false"
+want_notify="false"
+verb=""
+verb_args=()
+afanctl_resolved=""
+ac_env=()
+ac_args=()
+hw_min=""
+hw_max=""
+warnings_json="[]"
+
+Tmpfiles=()
+cleanup() {
+    [ "${#Tmpfiles[@]}" -eq 0 ] || rm -f -- "${Tmpfiles[@]}"
+}
+trap cleanup EXIT
+
+tmpfile() {
+    local f
+    f="$(mktemp "${TMPDIR:-/tmp}/omafan-ctl.XXXXXX")"
+    Tmpfiles+=("$f")
+    printf '%s\n' "$f"
+}
+
+usage() {
+    cat <<'EOF'
+omafan-ctl 1.0.0 - fan control CLI for pre-T2 Intel Macs, driving afanctl
+
+USAGE:
+  omafan-ctl status  [--json|--human] [--full] [globals]
+  omafan-ctl presets [--json|--human]          [globals]
+  omafan-ctl doctor  [--json|--human]          [globals]
+  omafan-ctl preset <auto|off|low|med|high|full> [--notify] [--dry-run] [globals]
+  omafan-ctl rpm <integer 0..100000> [--notify] [--dry-run] [--force] [globals]
+  omafan-ctl release [--notify] [--dry-run] [globals]   # alias of `preset auto`
+  omafan-ctl version | --version | -h | --help
+
+GLOBALS:
+  --afanctl <path>        afanctl binary (default: "afanctl" on PATH;
+                          env OMAFAN_AFANCTL)
+  --runtime-dir <dir>     afanctl runtime dir holding state.json
+                          (default: /run/afanctl; env OMAFAN_RUNTIME_DIR)
+  --config <path>         passed through to afanctl only when supplied
+  --pkexec <path|none>    privilege runner for writes (default: pkexec;
+                          "none" runs afanctl directly, tests/dev only;
+                          env OMAFAN_PKEXEC)
+  --json / --human        output format (default: json)
+  --notify / --no-notify  desktop notification via notify-send when present
+  --force                 override the degraded/out-of-band/undercooling
+                          refusals on writes
+  --dry-run               print the argv that would run, then exit 0
+
+EXIT CODES:
+  0 success   1 runtime failure   2 usage error   3 authorisation denied
+  4 afanctl missing or not executable
+  5 afanctl daemon not running / runtime dir unreadable / state.json absent
+  6 daemon degraded: monitor_only or auto_restore_pending (writes refused)
+  7 rpm outside [fan_min_rpm, fan_max_rpm] (writes refused)
+  8 refused as an undercooling risk (DESIGN.md section 5.1)
+EOF
+}
+
+notify_user() {
+    # A missing or failing notify-send must never change the exit code.
+    [ "$want_notify" = "true" ] || return 0
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -a omafan "Fan Control" "$1" >/dev/null 2>&1 || true
+    fi
+}
+
+# Shared human fix lines (English, one line, the same words everywhere).
+readonly FIX_INSTALL_AC="Fix: install afanctl (see its packaging/ directory)"
+readonly FIX_RESTART_AC="Fix: systemctl restart afanctl"
+readonly FIX_STATUS="Fix: run: omafan-ctl status --json"
+
+msg_afanctl_missing() {
+    printf "afanctl binary '%s' is missing or not executable. %s" \
+        "$afanctl_bin" "$FIX_INSTALL_AC"
+}
+
+msg_limits_unavailable() {
+    printf 'hardware limits unknown (afanctl status did not work; see stderr). %s' \
+        "Fix: run afanctl status --json by hand and check the daemon"
+}
+
+add_warning() {
+    warnings_json="$(printf '%s' "$warnings_json" | jq -c --arg w "$1" '. + [$w]')"
+}
+
+# Error envelope (section 4.3): JSON to stdout, human line to stderr.
+fail() {
+    # $1 exit code, $2 short error code, $3 schema, $4 human message
+    printf 'omafan-ctl: %s\n' "$4" >&2
+    if [ "$output_mode" = "json" ]; then
+        jq -cn --arg schema "$3" --arg e "$2" --arg m "$4" --argjson c "$1" \
+            '{schema: $schema, ok: false, error: $e, message: $m, exit_code: $c}'
+    fi
+    notify_user "$4"
+    exit "$1"
+}
+
+fail_action() { # $1 rc, $2 short code, $3 human message
+    fail "$1" "$2" "$ACTION_SCHEMA" "$3"
+}
+
+usage_error() {
+    printf 'omafan-ctl: usage error: %s\nFix: run omafan-ctl --help\n' "$1" >&2
+    if [ "$output_mode" = "json" ]; then
+        jq -cn --arg schema "$ACTION_SCHEMA" --arg m "$1" \
+            '{schema: $schema, ok: false, error: "usage", message: $m, exit_code: 2}'
+    fi
+    exit 2
+}
+
+need_value() {
+    if [ "$#" -lt 2 ] || [ -z "$2" ]; then
+        usage_error "$1 needs a value"
+    fi
+}
+
+afanctl_path() {
+    # Resolve once; names resolve on PATH, then every later invocation and
+    # logged argv uses the absolute path. Returns 1 when missing/not executable.
+    if [ -n "$afanctl_resolved" ]; then
+        printf '%s\n' "$afanctl_resolved"
+        return 0
+    fi
+    local resolved
+    if [[ "$afanctl_bin" == */* ]]; then
+        resolved="$afanctl_bin"
+        if [ ! -x "$resolved" ]; then
+            return 1
+        fi
+    else
+        if ! resolved="$(command -v -- "$afanctl_bin" 2>/dev/null)"; then
+            return 1
+        fi
+        if [ ! -x "$resolved" ]; then
+            return 1
+        fi
+    fi
+    afanctl_resolved="$resolved"
+    printf '%s\n' "$resolved"
+}
+
+afanctl_prepare() {
+    # Ruling R2: the runtime dir travels as an environment variable, the
+    # --config flag only when the user supplied it.
+    ac_env=(AFANCTL_RUNTIME_DIR="$runtime_dir")
+    ac_args=()
+    if [ -n "$config_path" ]; then
+        ac_args=(--config "$config_path")
+    fi
+}
+
+afanctl_version() {
+    # Cheap and root-free; echoes e.g. "0.1.0" (raw line when unrecognisable).
+    local p out
+    if ! p="$(afanctl_path)"; then
+        return 1
+    fi
+    if ! out="$(env "${ac_env[@]}" "$p" --version 2>/dev/null)"; then
+        return 1
+    fi
+    out="$(printf '%s\n' "$out" | head -n1 | tr -d '[:space:]')"
+    case "$out" in
+        afanctl*) printf '%s\n' "${out#afanctl}" ;;
+        *) printf '%s\n' "$out" ;;
+    esac
+}
+
+# Run `$afanctl status --json` directly (a read; never pkexec). Prints the
+# document on stdout; afanctl's stderr is never swallowed; wrong schema or a
+# failed run returns non-zero with stderr already on our stderr.
+query_afanctl_status() {
+    local out rc err
+    err="$(tmpfile)"
+    rc="0"
+    out="$(env "${ac_env[@]}" "$afanctl_resolved" \
+        ${ac_args[@]+"${ac_args[@]}"} status --json 2>"$err")" || rc="$?"
+    if [ "$rc" -ne 0 ]; then
+        cat -- "$err" >&2
+        return "$rc"
+    fi
+    cat -- "$err" >&2
+    if ! printf '%s' "$out" | jq -e '.schema == "afanctl.status.v1"' >/dev/null 2>&1; then
+        printf 'omafan-ctl: afanctl status did not emit afanctl.status.v1 JSON\n' >&2
+        return 1
+    fi
+    printf '%s\n' "$out"
+}
+
+# Read <runtime-dir>/state.json. On success sets the ST_* globals and returns
+# 0; returns 1 when the file is absent/unreadable; fails with exit 1 when the
+# file exists but is not the documented schema (never silently " offline").
+ST_PRESENT="false"
+ST_STATE=""
+ST_AGE=""
+ST_MODE=""
+ST_T_EFF="null"
+ST_TARGET="null"
+ST_LAST_WRITTEN="null"
+ST_ACTUAL="null"
+ST_VERIFIED="null"
+ST_MONITOR_ONLY="false"
+ST_AUTO_RESTORE="false"
+ST_POLLS="null"
+ST_RECENT_ERRORS="[]"
+
+read_state() {
+    local state_file="$runtime_dir/state.json"
+    local parsed now mtime age
+    if [ ! -r "$state_file" ]; then
+        return 1
+    fi
+    if ! parsed="$(jq -e --arg schema "$STATE_SCHEMA" 'select(.schema == $schema)' -- "$state_file" 2>/dev/null)"; then
+        fail 1 unparsable "$ACTION_SCHEMA" \
+            "state.json at $runtime_dir is not the documented $STATE_SCHEMA JSON. $FIX_RESTART_AC"
+    fi
+    ST_PRESENT="true"
+    ST_STATE="$parsed"
+    now="$(date +%s)"
+    mtime="$(stat -c %Y -- "$state_file" 2>/dev/null || echo 0)"
+    age=$((now - mtime))
+    if [ "$age" -lt 0 ]; then
+        age=0
+    fi
+    ST_AGE="$age"
+    ST_MODE="$(printf '%s' "$parsed" | jq -r '.mode // empty')"
+    ST_T_EFF="$(printf '%s' "$parsed" | jq -c '.t_eff_c // null')"
+    ST_TARGET="$(printf '%s' "$parsed" | jq -c '.target_rpm // null')"
+    ST_LAST_WRITTEN="$(printf '%s' "$parsed" | jq -c '.last_written_rpm // null')"
+    ST_ACTUAL="$(printf '%s' "$parsed" | jq -c '.actual_rpm // null')"
+    ST_VERIFIED="$(printf '%s' "$parsed" | jq -c '.verified // null')"
+    ST_MONITOR_ONLY="$(printf '%s' "$parsed" | jq -c '.monitor_only // false')"
+    ST_AUTO_RESTORE="$(printf '%s' "$parsed" | jq -c '.auto_restore_pending // false')"
+    ST_POLLS="$(printf '%s' "$parsed" | jq -c '.polls // null')"
+    ST_RECENT_ERRORS="$(printf '%s' "$parsed" | jq -c '.recent_errors // []')"
+    return 0
+}
+
+is_state_stale() {
+    # Unknown or negative ages count as stale: trusting a timestamp we could
+    # not read is the unsafe direction.
+    case "${1:-}" in
+        '' | *[!0-9]*) return 0 ;;
+    esac
+    [ "$1" -gt "$STALE_AFTER_S" ]
+}
+
+load_limits() {
+    # Fresh cache wins; otherwise one direct afanctl query (never pkexec); an
+    # unwritable cache is a warning, never an error (section 4.1). Sets
+    # hw_min/hw_max (empty when unknown) and returns 0/1.
+    local primary_dir="" fallback_dir="" cache_file=""
+    local captured min max status_json stale_ok=""
+    hw_min="" hw_max=""
+    if [ -n "${XDG_RUNTIME_DIR:-}" ]; then
+        primary_dir="${XDG_RUNTIME_DIR%/}/omafan"
+    fi
+    fallback_dir="/tmp/omafan-$(id -u)"
+    if [ -n "$primary_dir" ] && mkdir -p -- "$primary_dir" 2>/dev/null \
+            && [ -w "$primary_dir" ]; then
+        cache_file="$primary_dir/hw.json"
+    elif mkdir -p -- "$fallback_dir" 2>/dev/null && [ -w "$fallback_dir" ]; then
+        cache_file="$fallback_dir/hw.json"
+        if [ -n "$primary_dir" ]; then
+            add_warning "hardware limits cache not writable at $primary_dir; using $fallback_dir instead"
+        fi
+    else
+        add_warning "hardware limits cache not writable; afanctl will be queried whenever limits are needed"
+    fi
+
+    min="" max=""
+    if [ -n "$cache_file" ] && [ -r "$cache_file" ]; then
+        captured="$(jq -r '.captured_at // 0' -- "$cache_file" 2>/dev/null || echo 0)"
+        case "$captured" in '' | *[!0-9]*) captured=0 ;; esac
+        min="$(jq -r '.fan_min_rpm // empty' -- "$cache_file" 2>/dev/null || echo "")"
+        max="$(jq -r '.fan_max_rpm // empty' -- "$cache_file" 2>/dev/null || echo "")"
+        if [ -n "$min" ] && [ -n "$max" ] && [ "$min" -lt "$max" ] 2>/dev/null; then
+            if [ "$(( $(date +%s) - captured ))" -lt "$CACHE_TTL_S" ]; then
+                hw_min="$min" hw_max="$max"
+                return 0
+            fi
+            stale_ok="true" # keep as a fallback if afanctl cannot be asked
+        else
+            min="" max=""
+            add_warning "hardware limits cache did not parse at $cache_file; re-querying afanctl"
+        fi
+    fi
+
+    if ! afanctl_path >/dev/null 2>&1; then
+        if [ -n "$min" ]; then
+            hw_min="$min" hw_max="$max"
+            add_warning "afanctl ($afanctl_bin) not reachable; using the stale hardware limits cache"
+            return 0
+        fi
+        return 1
+    fi
+    if ! status_json="$(query_afanctl_status)"; then
+        if [ -n "$min" ]; then
+            hw_min="$min" hw_max="$max"
+            add_warning "afanctl status failed; using the stale hardware limits cache"
+            return 0
+        fi
+        return 1
+    fi
+    min="$(printf '%s' "$status_json" | jq -r '.fan.min_rpm // empty')"
+    max="$(printf '%s' "$status_json" | jq -r '.fan.max_rpm // empty')"
+    case "${min:-x}" in '' | *[!0-9]*) return 1 ;; esac
+    case "${max:-x}" in '' | *[!0-9]*) return 1 ;; esac
+    if [ "$min" -ge "$max" ]; then
+        return 1
+    fi
+    hw_min="$min"
+    hw_max="$max"
+    if [ -n "$cache_file" ]; then
+        local ver=""
+        ver="$(afanctl_version 2>/dev/null || true)"
+        if ! jq -cn --argjson min "$hw_min" --argjson max "$hw_max" \
+                --argjson now "$(date +%s)" --arg ver "$ver" \
+                '{fan_min_rpm: $min, fan_max_rpm: $max, captured_at: $now, afanctl_version: $ver}' \
+                >"$cache_file" 2>/dev/null; then
+            add_warning "hardware limits cache not writable at $cache_file"
+        fi
+    fi
+    return 0
+}
+
+# DESIGN.md section 3: the frozen ladder, mirroring Model.js exactly.
+preset_rpm() {
+    case "$1" in
+        auto) printf '' ;;
+        off) printf '%s\n' "$hw_min" ;;
+        full) printf '%s\n' "$hw_max" ;;
+        low | med | high)
+            local span=$((hw_max - hw_min)) scaled
+            case "$1" in
+                low) scaled=$((span * 250)) ;;
+                med) scaled=$((span * 500)) ;;
+                high) scaled=$((span * 750)) ;;
+            esac
+            # round(min + fraction * span): +500/1000 before the split = round.
+            printf '%s\n' "$((hw_min + (scaled + 500) / 1000))"
+            ;;
+        *) printf '' ;;
+    esac
+}
+
+preset_label() {
+    case "$1" in
+        auto) printf 'Auto (firmware)' ;;
+        off) printf 'Off (hardware floor)' ;;
+        low) printf 'Low' ;;
+        med) printf 'Medium' ;;
+        high) printf 'High' ;;
+        full) printf 'Full' ;;
+    esac
+}
+
+is_valid_preset_id() {
+    case "$1" in
+        auto | off | low | med | high | full) return 0 ;;
+    esac
+    return 1
+}
+
+build_presets_json() {
+    # The section-3 ladder as section 4.1/4.2 need it. rpm is null when the
+    # band is unknown, so the UI can show "unknown" instead of inventing 0.
+    local out="" pid rpm_val label kind item
+    for pid in auto off low med high full; do
+        rpm_val="$(preset_rpm "$pid")"
+        if [ -z "$rpm_val" ]; then
+            rpm_val=null
+        fi
+        label="$(preset_label "$pid")"
+        kind="hold"
+        if [ "$pid" = "auto" ]; then
+            kind="release"
+        fi
+        item="$(jq -cn --arg id "$pid" --arg label "$label" --arg kind "$kind" \
+            --argjson rpm "$rpm_val" \
+            '{id: $id, label: $label, rpm: $rpm, kind: $kind}')"
+        if [ -n "$out" ]; then
+            out="$out,$item"
+        else
+            out="$item"
+        fi
+    done
+    printf '[%s]\n' "$out"
+}
+
+# Section 5.1 undercooling guard, applied to every hold write (preset and the
+# manual rpm verb alike). jq does the numeric compare exactly; --force means a
+# deliberate override and is the user's call.
+is_undercooling_hot() {
+    # $1 t_eff_c JSON literal (number|null), $2 current rpm literal, $3 target
+    jq -en --argjson t "$1" --argjson a "$2" --argjson r "$3" \
+        '$t != null and $a != null and $r != null and $t >= 80 and $r < $a' \
+        >/dev/null 2>&1
+}
+
+undercooling_message() {
+    # Names the temperature, the current rpm, the request and the way out
+    # (section 5.1), for CLI phrasing of the panel's confirmation text.
+    printf 'CPU %s °C, fan %s rpm: %s holds %s rpm, below the firmware curve. Safe alternative: a preset at or above %s rpm (such as high), or re-run with --force to override.' \
+        "$ST_T_EFF" "$ST_ACTUAL" "$1" "$2" "$ST_ACTUAL"
+}
+
+action_json() {
+    # $1 action ("preset"|"rpm"), $2 preset id or "", $3 rpm JSON literal,
+    # $4 message, $6.. argv (read as $ARGS.positional inside the filter, whose
+    # position matters: jq takes its first non-option argument as the filter).
+    jq -cn --arg schema "$1" --arg action "$2" \
+        --arg pid "${3:-}" --argjson rpm "$4" --arg msg "$5" \
+        '{schema: $schema, ok: true, action: $action,
+          preset: (if $pid == "" then null else $pid end),
+          mode: (if $rpm == null then "observe" else "hold" end),
+          rpm: $rpm, argv: $ARGS.positional, exit_code: 0, message: $msg}' \
+        --args "${@:6}"
+}
+
+write_prereqs() {
+    # Guards between usage validation and execution. Dry-run skips them (so a
+    # preview works without a daemon) but keeps usage/band checks truthful.
+    if [ "$want_dry_run" = "true" ]; then
+        return 0
+    fi
+    if ! afanctl_path >/dev/null; then
+        fail_action 4 afanctl_missing "$(msg_afanctl_missing)"
+    fi
+    # A write with no readable state would fly blind: the degraded latch, the
+    # band and the undercooling guard all hang off that state. Refuse.
+    if ! read_state; then
+        fail_action 5 daemon_down \
+            "daemon not running or state.json at $runtime_dir unreadable. $FIX_RESTART_AC"
+    fi
+    if [ "$want_force" != "true" ]; then
+        if [ "$ST_MONITOR_ONLY" = "true" ]; then
+            fail_action 6 monitor_only \
+                "daemon is monitor-only, so writes are refused. $FIX_RESTART_AC"
+        fi
+        if [ "$ST_AUTO_RESTORE" = "true" ]; then
+            fail_action 6 auto_restore_pending \
+                "daemon is restoring the fan to firmware auto, writes refused. $FIX_STATUS"
+        fi
+    fi
+}
+
+assert_undercooling() {
+    # $1 request label for the message, $2 requested rpm literal
+    if [ "$want_force" = "true" ] || [ "$want_dry_run" = "true" ]; then
+        return 0
+    fi
+    if is_undercooling_hot "$ST_T_EFF" "$ST_ACTUAL" "$2"; then
+        fail_action 8 undercooling_risk "$(undercooling_message "$1" "$2")"
+    fi
+}
+
+assert_band() {
+    # $1 rpm (integer). Exit 7 when out of band; --force overrides. Unknown
+    # band here means the caller failed to load limits first.
+    if [ "$want_force" = "true" ]; then
+        return 0
+    fi
+    if [ -z "$hw_min" ] || [ -z "$hw_max" ]; then
+        return 1
+    fi
+    if [ "$1" -lt "$hw_min" ] || [ "$1" -gt "$hw_max" ]; then
+        fail_action 7 rpm_out_of_band \
+            "$1 rpm is outside the hardware fan band $hw_min..$hw_max. Fix: give an rpm in that range"
+    fi
+}
+
+run_write() {
+    # $1 action kind, $2 preset id or "", $3 rpm JSON literal (null = observe)
+    local kind="$1" preset_id="$2" rpm_lit="$3"
+    local -a runner_args mode_args argv
+    if [ "$rpm_lit" = "null" ]; then
+        mode_args=(observe)
+    else
+        mode_args=(hold "$rpm_lit")
+    fi
+    if [ "$pkexec_bin" = "none" ]; then
+        # Tests/dev: run the binary directly under our environment.
+        argv=("$afanctl_resolved" ${ac_args[@]+"${ac_args[@]}"} "${mode_args[@]}")
+        runner_env=("${ac_env[@]}")
+    else
+        local runner
+        if ! runner="$(command -v -- "$pkexec_bin" 2>/dev/null)"; then
+            fail_action 3 pkexec_missing \
+                "'$pkexec_bin' is not found, so the privileged write cannot run. Fix: install polkit (or --pkexec none, tests/dev only)"
+        fi
+        # pkexec scrubs the environment, so AFANCTL_RUNTIME_DIR must be set
+        # inside the privileged child: `pkexec env VAR=... program args`.
+        argv=("$runner" env "${ac_env[@]}" "$afanctl_resolved" \
+            ${ac_args[@]+"${ac_args[@]}"} "${mode_args[@]}")
+        runner_env=()
+    fi
+
+    if [ "$want_dry_run" = "true" ]; then
+        if [ "$output_mode" = "human" ]; then
+            printf 'argv: %s\n' "${argv[*]}"
+        else
+            jq -cn --arg schema "$ACTION_SCHEMA" --arg action "$kind" \
+                --arg pid "$preset_id" --argjson rpm "$rpm_lit" \
+                '{schema: $schema, ok: true, action: $action,
+                  preset: (if $pid == "" then null else $pid end),
+                  mode: (if $rpm == null then "observe" else "hold" end),
+                  rpm: $rpm, argv: $ARGS.positional, exit_code: 0,
+                  message: "dry-run: nothing was executed"}' \
+                --args "${argv[@]}"
+        fi
+        return 0
+    fi
+
+    local out rc err message
+    err="$(tmpfile)"
+    rc="0"
+    out="$(env "${runner_env[@]}" "${argv[@]}" 2>"$err")" || rc="$?"
+    if [ "$rc" -ne 0 ]; then
+        cat -- "$err" >&2
+        local polkit_hint="Fix: check the polkit rule /usr/share/polkit-1/rules.d/49-afanctl.rules, or run doctor --json"
+        if [ "$rc" -eq 126 ] || [ "$rc" -eq 127 ]; then
+            fail_action 3 not_authorized \
+                "authorisation denied or cancelled while running the write (rc=$rc). $polkit_hint"
+        fi
+        if grep -q "Not authorized" -- "$err" 2>/dev/null; then
+            fail_action 3 not_authorized \
+                'pkexec reported "Not authorized". Fix: the polkit rule must grant hold/observe/status to wheel users in a local session'
+        fi
+        fail_action 1 write_failed \
+            "afanctl exited with rc=$rc (stderr above). Fix: read status, then check afanctl recent_errors"
+    fi
+    cat -- "$err" >&2
+
+    if [ "$rpm_lit" = "null" ]; then
+        message="Released to firmware auto (afanctl observe)"
+        if [ -n "$preset_id" ]; then
+            message="Released to firmware auto (preset $preset_id)"
+        fi
+    else
+        message="Holding $rpm_lit rpm"
+        if [ -n "$preset_id" ]; then
+            message="Holding $rpm_lit rpm (preset $preset_id)"
+        fi
+    fi
+    if [ "$output_mode" = "json" ]; then
+        action_json "$ACTION_SCHEMA" "$kind" "$preset_id" "$rpm_lit" "$message" "${argv[@]}"
+    else
+        printf '%s\n' "$message"
+    fi
+    notify_user "$message"
+}
+
+# ---------------- verbs ----------------
+
+run_status() {
+    local rc_out=0 ac_present="true" ac_version="null"
+    local daemon_json fan_json hold_json thermal_json presets_json
+    local hold_rpm hold_preset sensors_json="[]"
+    local t_eff="$ST_T_EFF" state_stale="false"
+
+    if ! afanctl_path >/dev/null; then
+        # The daemon side is dead too; emit the document (truthful) with
+        # exit 4 so a reader cannot miss that the dependency is gone.
+        add_warning "$(msg_afanctl_missing)"
+        daemon_json='{"running": false, "mode": null, "monitor_only": false,
+                      "auto_restore_pending": false, "uptime_s": null,
+                      "polls": null, "state_age_s": null, "state_stale": true}'
+        fan_json='{"rpm": null, "target_rpm": null, "manual": false}'
+        thermal_json='{"t_eff_c": null, "sensors": []}'
+        hold_json='{"active": false, "preset": null, "rpm": null}'
+        presets_json="[]"
+        doc="$(jq -cn --arg schema "$STATUS_SCHEMA" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg path "$afanctl_bin" --argjson warnings "$warnings_json" \
+            --argjson daemon "$daemon_json" --argjson fan "$fan_json" \
+            --argjson thermal "$thermal_json" --argjson hold "$hold_json" \
+            --argjson presets "$presets_json" \
+            '{schema: $schema, ok: true, generated_at: $now,
+              afanctl: {path: $path, present: false, version: null},
+              daemon: $daemon,
+              hardware: {fan_min_rpm: null, fan_max_rpm: null},
+              fan: $fan, thermal: $thermal, hold: $hold, presets: $presets,
+              recent_errors: [], warnings: $warnings}')"
+        if [ "$output_mode" = "human" ]; then
+            printf 'afanctl: missing/not executable (%s); fix: install afanctl\n' "$afanctl_bin" >&2
+        else
+            printf '%s\n' "$doc"
+        fi
+        exit 4
+    fi
+
+    if ac_version="$(afanctl_version 2>/dev/null)"; then
+        :
+    else
+        ac_version="null"
+        add_warning "afanctl did not report a version"
+    fi
+
+    if ! load_limits; then
+        add_warning "hardware limits unknown (afanctl status unavailable); fan band shown as null"
+    fi
+
+    if [ "$want_full" = "true" ]; then
+        if full_json="$(query_afanctl_status)"; then
+            sensors_json="$(printf '%s' "$full_json" | jq -c '.sensors // []')"
+            t_eff="$(printf '%s' "$full_json" | jq -c '.effective.temp_c // null')"
+            full_uptime="$(printf '%s' "$full_json" | jq -c '.daemon.uptime_s // null')"
+        else
+            rc_out=1
+            add_warning "afanctl status failed (--full); the index render continues from state.json"
+            full_uptime="null"
+        fi
+    else
+        full_uptime="null"
+    fi
+
+    if read_state; then
+        if is_state_stale "$ST_AGE"; then
+            state_stale="true"
+        fi
+        if [ "$ST_MODE" = "hold" ]; then
+            hold_rpm="$(printf '%s' "$ST_STATE" | jq -c '.target_rpm // .last_written_rpm // null')"
+            hold_preset="custom"
+            if [ "$hold_rpm" != "null" ] && [ -n "$hw_min" ]; then
+                local pid
+                for pid in auto off low med high full; do
+                    pr="$(preset_rpm "$pid")" || pr=""
+                    if [ "$hold_rpm" = "$pr" ]; then
+                        hold_preset="$pid"
+                        break
+                    fi
+                done
+            fi
+            hold_json="$(jq -cn --argjson rpm "$hold_rpm" --arg p "$hold_preset" \
+                '{active: true, preset: $p, rpm: $rpm}')"
+        else
+            hold_json='{"active": false, "preset": null, "rpm": null}'
+        fi
+        fan_json="$(jq -cn --argjson rpm "$ST_ACTUAL" --argjson tgt "$ST_TARGET" \
+            --arg mode "$ST_MODE" \
+            '{rpm: $rpm, target_rpm: $tgt, manual: ($mode == "hold")}')"
+        daemon_json="$(jq -cn --argjson st "$ST_STATE" --argjson age "$ST_AGE" \
+            --argjson stale "$state_stale" --argjson up "$full_uptime" \
+            '{running: true, mode: $st.mode, monitor_only: $st.monitor_only,
+              auto_restore_pending: $st.auto_restore_pending, uptime_s: $up,
+              polls: $st.polls, state_age_s: $age, state_stale: $stale}')"
+        thermal_json="$(jq -cn --argjson t "$t_eff" --argjson sensors "$sensors_json" \
+            '{t_eff_c: $t, sensors: $sensors}')"
+    else
+        rc_out=5
+        daemon_json='{"running": false, "mode": null, "monitor_only": false,
+                      "auto_restore_pending": false, "uptime_s": null,
+                      "polls": null, "state_age_s": null, "state_stale": true}'
+        fan_json='{"rpm": null, "target_rpm": null, "manual": false}'
+        thermal_json="$(jq -cn --argjson t "$t_eff" --argjson sensors "$sensors_json" \
+            '{t_eff_c: $t, sensors: $sensors}')"
+        hold_json='{"active": false, "preset": null, "rpm": null}'
+        add_warning "state.json is absent in $runtime_dir; the afanctl daemon is not reporting"
+    fi
+    presets_json="$(build_presets_json)"
+    if [ -n "$hw_min" ]; then
+        hwmin_lit="$hw_min"
+        hwmax_lit="$hw_max"
+    else
+        hwmin_lit=null
+        hwmax_lit=null
+    fi
+    doc="$(jq -cn --arg schema "$STATUS_SCHEMA" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --arg path "$afanctl_resolved" --arg ver "$ac_version" \
+        --argjson warnings "$warnings_json" \
+        --argjson hwmin "$hwmin_lit" --argjson hwmax "$hwmax_lit" \
+        --argjson daemon "$daemon_json" --argjson fan "$fan_json" \
+        --argjson thermal "$thermal_json" --argjson hold "$hold_json" \
+        --argjson presets "$presets_json" --argjson re "$ST_RECENT_ERRORS" \
+        '{schema: $schema, ok: true, generated_at: $now,
+          afanctl: {path: $path, present: true, version: (if $ver == "" then null else $ver end)},
+          daemon: $daemon, hardware: {fan_min_rpm: $hwmin, fan_max_rpm: $hwmax},
+          fan: $fan, thermal: $thermal, hold: $hold, presets: $presets,
+          recent_errors: $re, warnings: $warnings}')"
+    if [ "$output_mode" = "human" ]; then
+        printf '%s\n' "$doc" | jq -r '
+            "daemon: " + (if .daemon.running then "running" else "not running" end)
+            + " mode: " + (.daemon.mode // "-"),
+            "t_eff: " + (if .thermal.t_eff_c == null then "-" else (.thermal.t_eff_c | tostring) + " °C" end),
+            "fan: " + (if .fan.rpm == null then "-" else (.fan.rpm | tostring) end) + " rpm"
+            + (if .hold.active then ", hold " + (.hold.rpm | tostring) + " rpm (" + (.hold.preset // "custom") + ")" else "" end),
+            "band: " + (.hardware.fan_min_rpm | tostring) + ".." + (.hardware.fan_max_rpm | tostring),
+            (.warnings[] | "warning: " + .)'
+    else
+        printf '%s\n' "$doc"
+    fi
+    exit "$rc_out"
+}
+
+run_presets() {
+    local rc_out=0
+    if ! afanctl_path >/dev/null; then
+        fail 4 afanctl_missing "$PRESETS_SCHEMA" "$(msg_afanctl_missing)"
+    fi
+    if ! load_limits; then
+        fail 1 limits_unavailable "$PRESETS_SCHEMA" "$(msg_limits_unavailable)"
+    fi
+    presets_json="$(build_presets_json)"
+    if [ "$output_mode" = "human" ]; then
+        printf 'band: %s%s..%s (step 100)\n' "" "$hw_min" "$hw_max"
+        printf '%s\n' "$presets_json" | jq -r '.[] | "\(.id)\t\(.label)\t\(if .rpm == null then "-" else tostring end)\t\(.kind)"'
+        exit 0
+    fi
+    jq -cn --arg schema "$PRESETS_SCHEMA" --argjson min "$hw_min" --argjson max "$hw_max" \
+        --argjson presets "$presets_json" \
+        '{schema: $schema, fan_min_rpm: $min, fan_max_rpm: $max,
+          presets: $presets, slider: {min_rpm: $min, max_rpm: $max, step_rpm: 100}}'
+    exit 0
+}
+
+# Checks of section 4.4: ids are fixed and complete; every line names a real
+# machine fact. Everything here is read-only (it never signs sysfs).
+add_check() {
+    # $1 id, $2 status, $3 detail -> one JSON line appended to the checks file
+    jq -cn --arg id "$1" --arg s "$2" --arg d "$3" \
+        '{id: $id, status: $s, detail: $d}' >>"$checks_file"
+    case "$2" in
+        PASS) checks_pass=$((checks_pass + 1)) ;;
+        WARN) checks_warn=$((checks_warn + 1)) ;;
+        *) checks_fail=$((checks_fail + 1)) ;;
+    esac
+}
+
+has_sys_glob() {
+    # Read-only existence check; no glob expansion surprises for set -u.
+    local pattern="$1"
+    compgen -G "$pattern" >/dev/null 2>&1
+}
+
+run_doctor() {
+    local checks_pass=0 checks_warn=0 checks_fail=0
+    checks_file="$(tmpfile)"
+    : >"$checks_file"
+    local ac_path="" ac_ver=""
+    if ac_path="$(afanctl_path 2>/dev/null)"; then
+        add_check afanctl_present PASS "$ac_path"
+        if ac_ver="$(afanctl_version 2>/dev/null)"; then
+            add_check afanctl_version PASS "$ac_ver"
+        else
+            add_check afanctl_version FAIL \
+                "afanctl did not report a version; fix: run afanctl --version by hand"
+        fi
+    else
+        add_check afanctl_present FAIL \
+            "afanctl '$afanctl_bin' missing. $FIX_INSTALL_AC"
+        add_check afanctl_version FAIL "cannot ask a missing afanctl for a version"
+    fi
+
+    if read_state; then
+        add_check daemon_running PASS "state.json present at $runtime_dir (mode $ST_MODE)"
+        if is_state_stale "$ST_AGE"; then
+            add_check state_fresh FAIL \
+                "state.json is ${ST_AGE}s old (limit ${STALE_AFTER_S}s); $FIX_RESTART_AC"
+        else
+            add_check state_fresh PASS "state.json is ${ST_AGE}s old"
+        fi
+    else
+        add_check daemon_running FAIL \
+            "state.json missing or unreadable at $runtime_dir; $FIX_RESTART_AC"
+        add_check state_fresh FAIL "no state to check freshness against"
+    fi
+
+    if pkexec_resolved="$(command -v -- "$pkexec_bin" 2>/dev/null)"; then
+        add_check pkexec_present PASS "$pkexec_resolved"
+    else
+        add_check pkexec_present WARN \
+            "'$pkexec_bin' not found; reads work, writes will need polkit"
+    fi
+    polkit_rule=""
+    if compgen -G "/usr/share/polkit-1/rules.d/*.rules" >/dev/null 2>&1; then
+        for f in /usr/share/polkit-1/rules.d/*.rules; do
+            if grep -q "afanctl" -- "$f" 2>/dev/null; then
+                polkit_rule="$f"
+                break
+            fi
+        done
+    fi
+    if [ -n "$polkit_rule" ]; then
+        add_check polkit_rule PASS "$polkit_rule"
+    else
+        add_check polkit_rule WARN \
+            "no afanctl rule in /usr/share/polkit-1/rules.d/; pkexec writes may prompt for a password"
+    fi
+
+    if has_sys_glob "/sys/devices/platform/applesmc.*"; then
+        add_check applesmc PASS "applesmc device present"
+    else
+        add_check applesmc WARN "no applesmc sysfs device found; this looks like a non-Apple machine"
+    fi
+    if has_sys_glob "/sys/devices/platform/coretemp.*/hwmon/*"; then
+        add_check coretemp PASS "coretemp hwmon present"
+    else
+        add_check coretemp WARN "no coretemp hwmon; CPU temperature may be unavailable"
+    fi
+
+    if load_limits; then
+        add_check hw_limits PASS "fan band $hw_min..$hw_max"
+    else
+        add_check hw_limits WARN \
+            "hardware limits unknown (no cache; afanctl status failed). Fix: run afanctl status --json by hand"
+    fi
+    if shell_bin="$(command -v omarchy-shell 2>/dev/null)"; then
+        add_check shell_ipc PASS "$shell_bin present; panel IPC target 'omafan' can work"
+    else
+        add_check shell_ipc WARN "omarchy-shell not found; the panel IPC is unavailable (CLI still works)"
+    fi
+    bindings_file="${OMAFAN_HYPR_CONFIG:-${HOME:-}/.config/hypr/bindings.lua}"
+    if [ -n "${HOME:-}" ] && [ -r "$bindings_file" ] \
+            && grep -q -- "-- BEGIN omafan" "$bindings_file" 2>/dev/null; then
+        add_check keybindings PASS "managed block present in $bindings_file"
+    else
+        add_check keybindings WARN \
+            "no omafan block in $bindings_file; fix: run bin/omafan-keybindings install"
+    fi
+
+    local ok="true" rc=0
+    if [ "$checks_fail" -gt 0 ]; then
+        ok="false"
+        rc=1
+    fi
+    if [ "$output_mode" = "human" ]; then
+        while IFS= read -r line; do
+            printf '%s\n' "$line" | jq -r '[.status, .id, .detail] | @tsv'
+        done <"$checks_file"
+        exit "$rc"
+    fi
+    jq -s -c --arg schema "$DOCTOR_SCHEMA" --argjson ok "$ok" \
+        '{schema: $schema, ok: $ok, checks: .,
+          summary: {pass: ([.[] | select(.status == "PASS")] | length),
+                    warn: ([.[] | select(.status == "WARN")] | length),
+                    fail: ([.[] | select(.status == "FAIL")] | length)}}' \
+        <"$checks_file"
+    exit "$rc"
+}
+
+do_write_preset() {
+    # $1 preset id
+    local pid="$1"
+    if ! is_valid_preset_id "$pid"; then
+        usage_error "unknown preset '$pid'. Fix: one of auto|off|low|med|high|full"
+    fi
+    if ! afanctl_path >/dev/null; then
+        fail_action 4 afanctl_missing "afanctl binary '$afanctl_bin' is missing or not executable. Fix: install afanctl (see its packaging/ directory)"
+    fi
+    if [ "$pid" != "auto" ] && ! load_limits; then
+        fail_action 1 limits_unavailable "hardware limits unknown (afanctl status did not work; see stderr). Fix: run afanctl status --json by hand and check the daemon"
+    fi
+    write_prereqs
+    if [ "$pid" = "auto" ]; then
+        run_write "preset" "auto" "null"
+        return 0
+    fi
+    local rpm_val label
+    rpm_val="$(preset_rpm "$pid")"
+    if [ -z "$rpm_val" ]; then
+        fail_action 1 limits_unavailable "preset '$pid' has no rpm because the hardware band is unknown. Fix: check afanctl status --json"
+    fi
+    label="$(preset_label "$pid")"
+    assert_undercooling "$label" "$rpm_val"
+    run_write "preset" "$pid" "$rpm_val"
+}
+
+do_write_rpm() {
+    # $1 raw rpm string
+    local rpm_raw="$1"
+    if [ -z "$rpm_raw" ]; then
+        usage_error "rpm needs an integer in 0..$STATE_FAN_MAX_INPUT"
+    fi
+    case "$rpm_raw" in
+        '' | *[!0-9]*)
+            usage_error "rpm must be an integer (got '$rpm_raw'). Fix: pass e.g. 4200"
+            ;;
+    esac
+    if [ "$rpm_raw" -gt "$STATE_FAN_MAX_INPUT" ]; then
+        usage_error "rpm $rpm_raw exceeds the CLI limit $STATE_FAN_MAX_INPUT. Fix: give an rpm in 0..$STATE_FAN_MAX_INPUT"
+    fi
+    if ! afanctl_path >/dev/null; then
+        fail_action 4 afanctl_missing "afanctl binary '$afanctl_bin' is missing or not executable. Fix: install afanctl (see its packaging/ directory)"
+    fi
+    if ! load_limits; then
+        fail_action 1 limits_unavailable "hardware limits unknown, so the band cannot be checked. Fix: run afanctl status --json by hand"
+    fi
+    write_prereqs
+    if [ -n "$hw_min" ] && [ "$hw_min" -gt 0 ]; then
+        if [ "$rpm_raw" -lt "$hw_min" ] || [ "$rpm_raw" -gt "$hw_max" ]; then
+            if [ "$want_force" != "true" ]; then
+                fail_action 7 rpm_out_of_band "$rpm_raw rpm is outside the hardware fan band $hw_min..$hw_max. Fix: give an rpm in $hw_min..$hw_max"
+            fi
+        fi
+    fi
+    assert_undercooling "a manual hold" "${rpm_raw}"
+    run_write "rpm" "" "${rpm_raw}"
+}
+
+run_version() {
+    printf 'omafan-ctl %s\n' "$OMAFAN_CTL_VERSION"
+    exit 0
+}
+
+# ---------------- argument parsing ----------------
+# Globals are order-insensitive: flags may come before or after the verb, and
+# are accepted wherever they appear. Any unknown flag is a usage error.
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --json) output_mode="json" ;;
+        --human) output_mode="human" ;;
+        --full) want_full="true" ;;
+        --notify) want_notify="true" ;;
+        --no-notify) want_notify="false" ;;
+        --dry-run) want_dry_run="true" ;;
+        --force) want_force="true" ;;
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        --version)
+            run_version
+            ;;
+        --afanctl)
+            need_value --afanctl "${2:-}"
+            afanctl_bin="$2"
+            shift
+            ;;
+        --afanctl=*) afanctl_bin="${1#*=}" ;;
+        --runtime-dir)
+            need_value --runtime-dir "${2:-}"
+            runtime_dir="$2"
+            shift
+            ;;
+        --runtime-dir=*) runtime_dir="${1#*=}" ;;
+        --config)
+            need_value --config "${2:-}"
+            config_path="$2"
+            shift
+            ;;
+        --config=*) config_path="${1#*=}" ;;
+        --pkexec)
+            need_value --pkexec "${2:-}"
+            pkexec_bin="$2"
+            shift
+            ;;
+        --pkexec=*) pkexec_bin="${1#*=}" ;;
+        --*) usage_error "unknown flag '$1'." ;;
+        *) verb_args+=("$1") ;;
+    esac
+    shift
+done
+
+if [ "${#verb_args[@]}" -gt 0 ]; then
+    verb="${verb_args[0]}"
+fi
+
+afanctl_prepare
+
+case "${verb:-}" in
+    "")
+        usage_error "no verb given. Fix: one of status|presets|doctor|preset|rpm|release|version"
+        ;;
+    version)
+        run_version
+        ;;
+    status)
+        run_status
+        ;;
+    presets)
+        run_presets
+        ;;
+    doctor)
+        run_doctor
+        ;;
+    preset)
+        if [ "${#verb_args[@]}" -lt 2 ]; then
+            usage_error "preset needs an id: preset <auto|off|low|med|high|full>"
+        fi
+        do_write_preset "${verb_args[1]}"
+        ;;
+    rpm)
+        if [ "${#verb_args[@]}" -lt 2 ]; then
+            usage_error "rpm needs an integer in 0..$STATE_FAN_MAX_INPUT"
+        fi
+        do_write_rpm "${verb_args[1]}"
+        ;;
+    release)
+        do_write_preset "auto"
+        ;;
+    *)
+        usage_error "unknown verb '$verb'. Fix: one of status|presets|doctor|preset|rpm|release|version"
+        ;;
+esac

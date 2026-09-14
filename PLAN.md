@@ -33,6 +33,7 @@ A worker never edits another ticket's files and never edits `DESIGN.md`.
 | P2 | **T04** `bin/omafan-ctl` | glm 5.3 flash high | `bin/omafan-ctl` | T03 | `tests/ctl.test.sh` (T05) PASS + `--dry-run` argv proven |
 | P2 | **T05** `tests/ctl.test.sh` | deepseek v4.1 flash | `tests/ctl.test.sh` | T03, T04 | runs green against T04; every exit code §4 exercised |
 | P2 | **T06** `bin/omafan-keybindings` + `tests/keybindings.test.sh` | glm 5.3 flash high | `bin/omafan-keybindings`, `tests/keybindings.test.sh` | — | tempdir install/remove/conflict tests PASS; free-chord assertion reproduces PRD §2.7 |
+| P2 | **T06b** keybindings fix round (helper path, guards, status) | glm 5.3 flash high | `bin/omafan-keybindings`, `tests/keybindings.test.sh` | T06 | defect list D1-D4 closed; suite ≥ 58 assertions green |
 | P3 | **T07** `BarWidget.qml` | deepseek v4.1 flash | `BarWidget.qml` | T01, T02 | `tests/qml-lint.sh` clean; live load shows no `qs log` error |
 | P3 | **T08** `KeyboardHelp.qml` | MiMo V2.5 | `KeyboardHelp.qml` | T01 | `tests/qml-lint.sh` clean |
 | P3 | **T09** `Panel.qml` | glm 5.3 flash high | `Panel.qml` | T01, T02, T04 | `tests/qml-lint.sh` clean; live IPC round-trip G5 |
@@ -263,6 +264,17 @@ opencode run --model <model> [--variant high] \
 - **Done:** `tests/qml-lint.sh` clean; live load with `OMAFAN_AFANCTL` pointed at
   the fixture shows the panel with no `qs log` errors; `omarchy-shell omafan state`
   returns the status JSON (orchestrator runs G5 and reports back).
+- **Orchestrator ruling (R4, 2026-09-15) — how the panel finds the helper and how
+  it is testable:** resolve the CLI from the plugin directory at runtime, never
+  from a hardcoded absolute path:
+  `readonly property string ctlPath: Qt.resolvedUrl("bin/omafan-ctl").toString().replace(/^file:\/\//, "")`.
+  Pass the environment through so the same QML can be exercised against the
+  fixture without touching the fan — read `Quickshell.env("OMAFAN_AFANCTL")`,
+  `Quickshell.env("OMAFAN_RUNTIME_DIR")`, `Quickshell.env("OMAFAN_PKEXEC")` and
+  add `--afanctl`/`--runtime-dir`/`--pkexec` arguments only when set. Use
+  `Quickshell.Io` `Process` with the **array** `command:` form plus a
+  `StdioCollector`; never build a shell string, never use `execDetached` for
+  anything whose result the panel reads back.
 
 ### T10 — `tests/integration-shell.sh` + `tests/hw-smoke.sh`
 - **Goal:** the two opt-in live suites, both safe by default.

@@ -19,9 +19,14 @@ const NAMES = [
   "formatRpm", "formatTemp", "formatUptime", "isStateStale"
 ];
 
+// T02b adds the two DESIGN.md §5.1 guard functions additively: the T02 list and
+// its assertion stay as they were, and only the sandbox export grows.
+const GUARD_NAMES = ["isUndercoolingHot", "undercoolingWarning"];
+const ALL_NAMES = NAMES.concat(GUARD_NAMES);
+
 let Model;
 try {
-  const body = source + "\nreturn {" + NAMES.join(",") + "};\n";
+  const body = source + "\nreturn {" + ALL_NAMES.join(",") + "};\n";
   Model = new Function(body)();
 } catch (err) {
   console.error("FATAL: Model.js could not be evaluated: " + err.message);
@@ -100,6 +105,8 @@ const FIX_CHECK = "omafan-ctl status";
 
 record(NAMES.every((n) => typeof Model[n] === "function"),
   "Model.js exports all 17 DESIGN.md §5 functions as functions");
+record(GUARD_NAMES.every((n) => typeof Model[n] === "function"),
+  "Model.js exports both DESIGN.md §5.1 guard functions as functions");
 
 // --- ES5-safety / purity of the source (the QML + Node dual use) ---------
 
@@ -300,6 +307,57 @@ eq("isStateStale(6) is true", Model.isStateStale(6), true);
 eq("isStateStale(0) is false", Model.isStateStale(0), false);
 eq("isStateStale(undefined) is true (refuse writes on an unread age)",
   Model.isStateStale(undefined), true);
+
+// --- undercooling guard (DESIGN.md §5.1, T02b) ---------------------------
+
+function guardStatus(temp, current) {
+  return withStatus({ thermal: { t_eff_c: temp }, fan: { rpm: current } });
+}
+
+eq("isUndercoolingHot is false on a cold machine",
+  Model.isUndercoolingHot(guardStatus(64, 4794), 2700), false);
+eq("isUndercoolingHot is true at exactly 80 °C with a lower target",
+  Model.isUndercoolingHot(guardStatus(80, 4794), 2700), true);
+eq("isUndercoolingHot is false at 79 °C",
+  Model.isUndercoolingHot(guardStatus(79, 4794), 2700), false);
+eq("isUndercoolingHot is false when the target equals the current rpm",
+  Model.isUndercoolingHot(guardStatus(97, 4200), 4200), false);
+eq("isUndercoolingHot is false when the target is above the current rpm",
+  Model.isUndercoolingHot(guardStatus(97, 4200), 5700), false);
+eq("isUndercoolingHot is false for auto (null target)",
+  Model.isUndercoolingHot(guardStatus(97, 4794), null), false);
+eq("isUndercoolingHot is false for a null status",
+  Model.isUndercoolingHot(null, 2700), false);
+eq("isUndercoolingHot is false for a shapeless status",
+  Model.isUndercoolingHot({}, 2700), false);
+eq("isUndercoolingHot is false when the temperature is unreadable",
+  Model.isUndercoolingHot(guardStatus(undefined, 4794), 2700), false);
+eq("isUndercoolingHot is false when the fan rpm is unreadable",
+  Model.isUndercoolingHot(guardStatus(97, undefined), 2700), false);
+eq("isUndercoolingHot is false for a non-numeric target",
+  Model.isUndercoolingHot(guardStatus(97, 4794), "abc"), false);
+
+eq("undercoolingWarning is null when the machine is not undercooling",
+  Model.undercoolingWarning(guardStatus(64, 4794), 2700), null);
+eq("undercoolingWarning is null for auto",
+  Model.undercoolingWarning(guardStatus(97, 4794), null), null);
+eq("undercoolingWarning is null for a null status",
+  Model.undercoolingWarning(null, 2700), null);
+
+const warning = Model.undercoolingWarning(guardStatus(97, 4794), 2700);
+truthy("undercoolingWarning returns a non-empty string when undercooling",
+  typeof warning === "string" && warning.length > 0);
+contains("undercoolingWarning names the temperature", warning, "97 °C");
+contains("undercoolingWarning names the current rpm", warning, "4,794 rpm");
+contains("undercoolingWarning names the requested rpm", warning, "2,700 rpm");
+contains("undercoolingWarning says the request is below the curve", warning, "below");
+contains("undercoolingWarning names the nearest preset at or above the fan",
+  warning, "High (5,700 rpm)");
+contains("undercoolingWarning tells the operator how to override", warning, "10 s");
+eq("undercoolingWarning is a single sentence",
+  (warning.match(/[.!?](\s|$)/g) || []).length, 1);
+contains("undercoolingWarning falls back to Auto above the ladder ceiling",
+  Model.undercoolingWarning(guardStatus(97, 9000), 1200), "Auto (firmware)");
 
 // --- summary -------------------------------------------------------------
 

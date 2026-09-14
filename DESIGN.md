@@ -111,6 +111,7 @@ omafan-ctl status   [--json|--human] [--full] [--afanctl P] [--runtime-dir D] [-
 omafan-ctl presets  [--json|--human]  ...same globals
 omafan-ctl doctor   [--json|--human]  ...same globals
 omafan-ctl preset <auto|off|low|med|high|full> [--notify] [--dry-run] ...
+omafan-ctl cycle  [--notify] [--dry-run] ...            # next preset in §3 order (see §4.5)
 omafan-ctl rpm <integer 0..100000>   [--notify] [--dry-run] [--force] ...
 omafan-ctl release  [--notify] [--dry-run] ...          # alias of `preset auto`
 omafan-ctl version | --version | -h | --help
@@ -215,6 +216,20 @@ Check ids (fixed): `afanctl_present`, `afanctl_version`, `daemon_running`,
 `state_fresh`, `pkexec_present`, `polkit_rule`, `applesmc`, `coretemp`,
 `hw_limits`, `shell_ipc`, `keybindings`. Any `FAIL` ⇒ exit 1. `WARN` never
 fails the exit code. `status` ∈ `PASS|WARN|FAIL`.
+
+### 4.5 `cycle` semantics
+
+`cycle` is the verb behind the `SUPER + ALT + C` chord and the panel's `c` key.
+
+- Read the current preset: `hold.preset` when `daemon.mode == "hold"` (using the
+  same derivation as §4.1, including `custom`: a hold at a non-preset rpm cycles
+  to `off`), otherwise `auto`.
+- Next = one step forward in the §3 order with wraparound
+  (`auto → off → low → med → high → full → auto`), identical to
+  `Model.cyclePreset(current, +1)`.
+- Apply it exactly like `preset <next>` (same exit codes, same §5.1 guard, same
+  JSON with `"action": "cycle"` and `"preset": "<next>"`).
+- Read-only verbs are unaffected; `cycle` is a write verb.
 
 ## 5. `Model.js` — pure function contract (frozen)
 

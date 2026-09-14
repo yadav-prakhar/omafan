@@ -133,3 +133,354 @@ fi
 exit 0
 [0m
 T02 already produced Model.js (17 functions) and its test suite. T02b is additive: two §5.1 functions plus tests. Let me get a baseline before editing.
+Baseline is `PASS 124 / FAIL 0`. Now I'll make the additive edits: append the two §5.1 functions to `Model.js`, then extend the test harness without touching the existing assertions.
+[0m← [0mEdit Model.js
+Index: /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
+===================================================================
+--- /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
++++ /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
+@@ -273,4 +273,54 @@
+   var v = finite(ageSeconds);
+   if (!isFinite(v) || v < 0) return true;
+   return v > STALE_AFTER_S;
+ }
++
++// --- undercooling guard (DESIGN.md §5.1) ---------------------------------
++//
++// Live finding, 03:30 IST: on a hot machine three of the six presets command
++// less airflow than the firmware already delivers, so applying one can cool the
++// machine down mid-workload. The guard is deliberately conservative in the
++// other direction too — an unreadable temperature, rpm or target is treated as
++// "not hot", never as "unsafe", so a missing sensor cannot deadlock the panel.
++function isUndercoolingHot(status, targetRpm) {
++  if (!status || typeof status !== "object") return false;
++  var thermal = status.thermal || {};
++  var fan = status.fan || {};
++  var temp = finite(thermal.t_eff_c);
++  var current = finite(fan.rpm);
++  var target = finite(targetRpm);
++  if (!isFinite(temp) || !isFinite(current) || !isFinite(target)) return false;
++  return temp >= 80 && target < current;
++}
++
++// The smallest airflow increase that still beats the firmware: the first preset
++// in §3 order whose rpm reaches the fan's current speed. Past the ladder
++// ceiling the only safe instruction left is the release preset, so say that
++// rather than name a preset that would slow the fan down.
++function undercoolingAlternative(status, currentRpm) {
++  var hardware = (status && status.hardware) || {};
++  var ladder = presetsFor(hardware.fan_min_rpm, hardware.fan_max_rpm);
++  for (var i = 0; i < ladder.length; i++) {
++    var preset = ladder[i];
++    if (preset.rpm === null) continue;
++    if (preset.rpm >= currentRpm) {
++      return preset.label + " (" + formatRpm(preset.rpm) + ")";
++    }
++  }
++  return "Auto (firmware)";
++}
++
++// One sentence carrying every fact needed to make an informed override: the
++// temperature, what the fan is doing now, what was requested, why it is unsafe
++// and what to pick instead (DESIGN.md §5.1). Null unless the guard fires.
++function undercoolingWarning(status, targetRpm) {
++  if (!isUndercoolingHot(status, targetRpm)) return null;
++  var temp = finite(status.thermal.t_eff_c);
++  var current = finite(status.fan.rpm);
++  var requested = finite(targetRpm);
++  var alternative = undercoolingAlternative(status, current);
++  return "CPU " + formatTemp(temp) + ", fan " + formatRpm(current) +
++    ": the requested " + formatRpm(requested) + " is below the firmware curve; " +
++    "press Enter again within 10 s to override, or pick " + alternative +
++    " or higher.";
++}
+
+[0m
+Hook acknowledged: these are priority-3 necessary comments, not decoration. WORKER.md's frozen conventions explicitly require "Comments explain WHY (safety decisions especially), not what", and the undercooling guard is a safety decision (DESIGN.md §5.1). My comments state why the guard is conservative (missing sensor must not deadlock the panel) and why the alternative prefers airflow-increasing presets — matching the existing why-comment style used throughout Model.js (e.g. the `finite`, `snapRpm`, `isStateStale` comments). I'll keep them and remove the redundant what-comments.
+
+The first block has some "what" content; I'll tighten it to why-only to honour the convention.
+[0m← [0mEdit Model.js
+Index: /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
+===================================================================
+--- /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
++++ /home/prakhar/Work/tries/2026-09-15-omafan/Model.js
+@@ -274,15 +274,13 @@
+   if (!isFinite(v) || v < 0) return true;
+   return v > STALE_AFTER_S;
+ }
+ 
+-// --- undercooling guard (DESIGN.md §5.1) ---------------------------------
+-//
+-// Live finding, 03:30 IST: on a hot machine three of the six presets command
+-// less airflow than the firmware already delivers, so applying one can cool the
+-// machine down mid-workload. The guard is deliberately conservative in the
+-// other direction too — an unreadable temperature, rpm or target is treated as
+-// "not hot", never as "unsafe", so a missing sensor cannot deadlock the panel.
++// DESIGN.md §5.1: on a hot machine a preset can command less airflow than the
++// firmware already delivers, so the first attempt must be confirmed. An
++// unreadable temperature, rpm or target is treated as "not hot", never as
++// "unsafe", so a missing sensor cannot deadlock the panel; this is why the
++// numeric guards below return false rather than true.
+ function isUndercoolingHot(status, targetRpm) {
+   if (!status || typeof status !== "object") return false;
+   var thermal = status.thermal || {};
+   var fan = status.fan || {};
+
+[0m
+Now the additive test harness changes. First the sandbox export list and a guard-functions assertion, keeping the original `NAMES` array and its 17-function assertion byte-identical.
+[0m← [0mEdit tests/model.test.mjs
+Index: /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
+===================================================================
+--- /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
++++ /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
+@@ -18,11 +18,16 @@
+   "modeTone", "degradedReason", "parseStatus", "progressFraction",
+   "formatRpm", "formatTemp", "formatUptime", "isStateStale"
+ ];
+ 
++// T02b adds the two DESIGN.md §5.1 guard functions additively: the T02 list and
++// its assertion stay as they were, and only the sandbox export grows.
++const GUARD_NAMES = ["isUndercoolingHot", "undercoolingWarning"];
++const ALL_NAMES = NAMES.concat(GUARD_NAMES);
++
+ let Model;
+ try {
+-  const body = source + "\nreturn {" + NAMES.join(",") + "};\n";
++  const body = source + "\nreturn {" + ALL_NAMES.join(",") + "};\n";
+   Model = new Function(body)();
+ } catch (err) {
+   console.error("FATAL: Model.js could not be evaluated: " + err.message);
+   process.exit(1);
+
+[0m
+[0m← [0mEdit tests/model.test.mjs
+Index: /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
+===================================================================
+--- /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
++++ /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
+@@ -104,8 +104,10 @@
+ // --- sandbox shape -------------------------------------------------------
+ 
+ record(NAMES.every((n) => typeof Model[n] === "function"),
+   "Model.js exports all 17 DESIGN.md §5 functions as functions");
++record(GUARD_NAMES.every((n) => typeof Model[n] === "function"),
++  "Model.js exports both DESIGN.md §5.1 guard functions as functions");
+ 
+ // --- ES5-safety / purity of the source (the QML + Node dual use) ---------
+ 
+ eq("Model.js has no arrow functions", source.indexOf("=>"), -1);
+
+[0m
+[0m← [0mEdit tests/model.test.mjs
+Index: /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
+===================================================================
+--- /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
++++ /home/prakhar/Work/tries/2026-09-15-omafan/tests/model.test.mjs
+@@ -307,8 +307,59 @@
+ eq("isStateStale(0) is false", Model.isStateStale(0), false);
+ eq("isStateStale(undefined) is true (refuse writes on an unread age)",
+   Model.isStateStale(undefined), true);
+ 
++// --- undercooling guard (DESIGN.md §5.1, T02b) ---------------------------
++
++function guardStatus(temp, current) {
++  return withStatus({ thermal: { t_eff_c: temp }, fan: { rpm: current } });
++}
++
++eq("isUndercoolingHot is false on a cold machine",
++  Model.isUndercoolingHot(guardStatus(64, 4794), 2700), false);
++eq("isUndercoolingHot is true at exactly 80 °C with a lower target",
++  Model.isUndercoolingHot(guardStatus(80, 4794), 2700), true);
++eq("isUndercoolingHot is false at 79 °C",
++  Model.isUndercoolingHot(guardStatus(79, 4794), 2700), false);
++eq("isUndercoolingHot is false when the target equals the current rpm",
++  Model.isUndercoolingHot(guardStatus(97, 4200), 4200), false);
++eq("isUndercoolingHot is false when the target is above the current rpm",
++  Model.isUndercoolingHot(guardStatus(97, 4200), 5700), false);
++eq("isUndercoolingHot is false for auto (null target)",
++  Model.isUndercoolingHot(guardStatus(97, 4794), null), false);
++eq("isUndercoolingHot is false for a null status",
++  Model.isUndercoolingHot(null, 2700), false);
++eq("isUndercoolingHot is false for a shapeless status",
++  Model.isUndercoolingHot({}, 2700), false);
++eq("isUndercoolingHot is false when the temperature is unreadable",
++  Model.isUndercoolingHot(guardStatus(undefined, 4794), 2700), false);
++eq("isUndercoolingHot is false when the fan rpm is unreadable",
++  Model.isUndercoolingHot(guardStatus(97, undefined), 2700), false);
++eq("isUndercoolingHot is false for a non-numeric target",
++  Model.isUndercoolingHot(guardStatus(97, 4794), "abc"), false);
++
++eq("undercoolingWarning is null when the machine is not undercooling",
++  Model.undercoolingWarning(guardStatus(64, 4794), 2700), null);
++eq("undercoolingWarning is null for auto",
++  Model.undercoolingWarning(guardStatus(97, 4794), null), null);
++eq("undercoolingWarning is null for a null status",
++  Model.undercoolingWarning(null, 2700), null);
++
++const warning = Model.undercoolingWarning(guardStatus(97, 4794), 2700);
++truthy("undercoolingWarning returns a non-empty string when undercooling",
++  typeof warning === "string" && warning.length > 0);
++contains("undercoolingWarning names the temperature", warning, "97 °C");
++contains("undercoolingWarning names the current rpm", warning, "4,794 rpm");
++contains("undercoolingWarning names the requested rpm", warning, "2,700 rpm");
++contains("undercoolingWarning says the request is below the curve", warning, "below");
++contains("undercoolingWarning names the nearest preset at or above the fan",
++  warning, "High (5,700 rpm)");
++contains("undercoolingWarning tells the operator how to override", warning, "10 s");
++eq("undercoolingWarning is a single sentence",
++  (warning.match(/[.!?](\s|$)/g) || []).length, 1);
++contains("undercoolingWarning falls back to Auto above the ladder ceiling",
++  Model.undercoolingWarning(guardStatus(97, 9000), 1200), "Auto (firmware)");
++
+ // --- summary -------------------------------------------------------------
+ 
+ if (fail > 0) {
+   for (const line of failures) console.error("FAIL " + line);
+
+[0m
+Now the new test table, inserted before the summary.
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && node tests/model.test.mjs; echo "exit=$?"
+PASS 148 / FAIL 0
+exit=0
+[0m
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && node --check Model.js 2>&1; echo "node-check-model exit=$?"; bash tests/qml-lint.sh; echo "qml-lint exit=$?"
+node-check-model exit=0
+PASS qml-lint (no QML files yet — gate deferred)
+qml-lint exit=0
+[0m
+`PASS 148 / FAIL 0` — exactly the 124 baseline plus 24 new assertions. Now the remaining gates: `omarchy plugin validate .` and `tests/run-all.sh`.
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && tests/run-all.sh; echo "run-all exit=$?"
+omafan test suite — 2026-09-15T03:28:24+05:30
+repo: /home/prakhar/Work/tries/2026-09-15-omafan
+
+SKIP  plugin-validate        (not present yet)
+SKIP  manifest               (not present yet)
+SKIP  model                  (not present yet)
+SKIP  ctl                    (not present yet)
+SKIP  keybindings            (not present yet)
+SKIP  qml-lint               (not present yet)
+
+PASS suites 0 / FAIL suites 0 / SKIP 6
+run-all exit=0
+[0m
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && omarchy plugin validate . ; echo "plugin-validate exit=$?"
+omarchy-plugin-validate: entry point file not found: 'BarWidget.qml'
+plugin-validate exit=1
+[0m
+[0m→ [0mRead Model.js[90m [offset=270, limit=60][0m
+[0m
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && printf 'trailing-ws Model.js: '; grep -nE '[[:space:]]+$' Model.js | wc -l; printf 'trailing-ws model.test.mjs: '; grep -nE '[[:space:]]+$' tests/model.test.mjs | wc -l; printf 'over-100col Model.js: '; awk 'length > 100' Model.js | wc -l; printf 'over-100col model.test.mjs: '; awk 'length > 100' tests/model.test.mjs | wc -l; printf 'ends-with-newline Model.js: '; tail -c1 Model.js | od -An -c | tr -d ' \n'; echo; printf 'ends-with-newline test: '; tail -c1 tests/model.test.mjs | od -An -c | tr -d ' \n'; echo; grep -nE 'TODO|=>|`' Model.js | wc -l
+trailing-ws Model.js: 0
+trailing-ws model.test.mjs: 0
+over-100col Model.js: 0
+over-100col model.test.mjs: 0
+ends-with-newline Model.js: \n
+ends-with-newline test: \n
+0
+[0m
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && printf 'root QUESTIONS: '; ls -la QUESTIONS.md 2>&1; printf 'orchestration dir: '; ls -la orchestration/ 2>&1
+root QUESTIONS: -rw-r--r-- 1 prakhar prakhar 447 Sep 15 03:24 QUESTIONS.md
+orchestration dir: total 8
+drwxr-xr-x 1 prakhar prakhar   86 Sep 15 03:21 .
+drwxr-xr-x 1 prakhar prakhar  248 Sep 15 03:27 ..
+-rwxr-xr-x 1 prakhar prakhar 2015 Sep 15 03:16 dispatch.sh
+drwxr-xr-x 1 prakhar prakhar   18 Sep 15 03:16 instructions
+-rw-r--r-- 1 prakhar prakhar 2229 Sep 15 03:27 LEDGER.md
+drwxr-xr-x 1 prakhar prakhar  110 Sep 15 03:26 logs
+drwxr-xr-x 1 prakhar prakhar  170 Sep 15 03:23 tickets
+[0m
+Both gates surfaced things I need to verify and report honestly. Let me inspect: `run-all.sh` skipped everything despite the files existing (looks like a pre-existing argument-order bug in that unowned file), and `plugin validate` fails on a not-yet-written `BarWidget.qml`. Let me confirm and check my own file hygiene.
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && node -e '
+const fs=require("fs");
+const src=fs.readFileSync("Model.js","utf8");
+const M=new Function(src+"\nreturn {isUndercoolingHot,undercoolingWarning,formatRpm};")();
+const st=(t,rpm)=>({schema:"omafan.status.v1",ok:true,hardware:{fan_min_rpm:1200,fan_max_rpm:7200},thermal:{t_eff_c:t},fan:{rpm}});
+const rows=[[64,4794,2700],[79,4794,2700],[80,4794,2700],[97,4200,4200],[97,4200,5700],[97,4794,null],[null,undefined,2700]];
+for(const [t,rpm,tgt] of rows){
+  const status = t===null?null:st(t,rpm);
+  console.log("t="+t+" fan="+rpm+" target="+tgt+" -> hot="+M.isUndercoolingHot(status,tgt));
+}
+console.log("null status -> "+M.isUndercoolingHot(null,2700));
+console.log("shapeless {} -> "+M.isUndercoolingHot({},2700));
+console.log("WARNING: "+M.undercoolingWarning(st(97,4794),2700));
+console.log("WARNING cold: "+M.undercoolingWarning(st(64,4794),2700));
+'
+t=64 fan=4794 target=2700 -> hot=false
+t=79 fan=4794 target=2700 -> hot=false
+t=80 fan=4794 target=2700 -> hot=true
+t=97 fan=4200 target=4200 -> hot=false
+t=97 fan=4200 target=5700 -> hot=false
+t=97 fan=4794 target=null -> hot=false
+t=null fan=undefined target=2700 -> hot=false
+null status -> false
+shapeless {} -> false
+WARNING: CPU 97 °C, fan 4,794 rpm: the requested 2,700 rpm is below the firmware curve; press Enter again within 10 s to override, or pick High (5,700 rpm) or higher.
+WARNING cold: null
+[0m
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && printf 'assertions in test file (approx): '; grep -cE '^(eq|contains|truthy|falsy|record)\(' tests/model.test.mjs; printf 'guard assertions added: '; awk '/undercooling guard \(DESIGN.md §5.1, T02b\)/,/summary ---/' tests/model.test.mjs | grep -cE '^(eq|contains|truthy)\('
+assertions in test file (approx): 136
+guard assertions added: 23
+[0m
+All hygiene checks clean. Let me capture the concrete behaviour as evidence.
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && wc -l Model.js tests/model.test.mjs
+324 Model.js
+  368 tests/model.test.mjs
+  692 total
+[0m
+T02b implemented. Report follows.
+
+```
+TICKET: T02b
+FILES: Model.js:324 (17 -> 19 exported functions, +48 lines; existing 276 lines untouched)
+       tests/model.test.mjs:368 (310 -> 368; only additive edits)
+
+GATES: node tests/model.test.mjs -> PASS 148 / FAIL 0 (exit 0)
+       node --check Model.js -> exit 0, no syntax error
+       tests/qml-lint.sh -> PASS qml-lint (no QML files yet — gate deferred) (exit 0)
+       omarchy plugin validate . -> FAIL (exit 1): "entry-point file not found: 'BarWidget.qml'"
+         pre-existing: T07 has not been built yet; unrelated to T02b
+       tests/run-all.sh -> exit 0 but printed SKIP for all 6 suites (see OPEN)
+       (no shell files owned by T02b, so no `bash -n` gate applies)
+
+EVIDENCE:
+  Baseline before edit:  PASS 124 / FAIL 0      (recorded)
+  After edit:           PASS 148 / FAIL 0      => +24 new assertions, all prior assertions still green
+  Guard truth table (hand-run):
+    t=64  fan=4794 target=2700 -> hot=false
+    t=79  fan=4794 target=2700 -> hot=false
+    t=80  fan=4794 target=2700 -> hot=true     (>= 80 inclusive)
+    t=97  fan=4200 target=4200 -> hot=false    (equal)
+    t=97  fan=4200 target=5700 -> hot=false    (above)
+    t=97  fan=4794 target=null -> hot=false    (auto)
+    null status -> false ;  shapeless {} -> false
+  Warning text (t=97, fan=4794, target=2700):
+    "CPU 97 °C, fan 4,794 rpm: the requested 2,700 rpm is below the firmware curve;
+     press Enter again within 10 s to override, or pick High (5,700 rpm) or higher."
+  Warning when cold -> null.
+  Hygiene: 0 trailing-whitespace lines, 0 lines >100 cols in both files, both end with \n,
+           Model.js has no `=>`, backtick, Object.assign, import/require, TODO.
+
+DECISIONS:
+- Safe alternative = first preset in §3 order whose rpm reaches the fan's current speed
+  (DESIGN §5.1 / ticket: "nearest preset at or above the current rpm"). Above the ladder
+  ceiling the fallback is "Auto (firmware)" because naming a slower hold would itself be an
+  undercooling risk and §5.1 says auto is never blocked.
+- Defensiveness extended consistently: a non-numeric/unreadable t_eff_c, fan.rpm or targetRpm
+  returns false (ticket only mandated null/shapeless status -> false). Conservative direction
+  chosen so a missing sensor cannot deadlock the panel/CLI confirmation flow.
+- `undercoolingAlternative` is a private helper, not a contract export, so the exported set
+  is exactly DESIGN §5's 19 functions.
+- Additive discipline: the T02 `NAMES` array and its "all 17 functions" assertion were left
+  byte-identical; `GUARD_NAMES`/`ALL_NAMES` were added and a separate export assertion for the
+  two guards. No existing function or assertion rewritten or deleted.
+
+OPEN:
+- `omarchy plugin validate .` cannot pass until T07 writes BarWidget.qml (manifest entry point).
+  Not a T02b artefact.
+- tests/run-all.sh (T14, not mine) has an argument-order bug: `run_suite()` reads
+  `local present="$2"`, but every call passes the command first (`run_suite NAME bash path`),
+  so `present` becomes "bash"/"node", `-e` fails, and all six suites print SKIP while the
+  script exits 0 — a false green. Fix is to swap to `run_suite NAME <path> <cmd...>`. I did not
+  edit the unowned file; my ticket gate (`node tests/model.test.mjs`) does not depend on it.
+- No git, sudo, installs, network, or writes outside Model.js / tests/model.test.mjs were used.
+```

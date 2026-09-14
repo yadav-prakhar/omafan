@@ -1,0 +1,50 @@
+=== dispatch T08 model=opencode-go/mimo-v2.5 variant=default at 2026-09-15T03:39:01+05:30
+[0m
+> Sisyphus - ultraworker · mimo-v2.5
+[0m
+[0m→ [0mRead orchestration/instructions/WORKER.md
+[0m→ [0mRead PRD.md
+[0m→ [0mRead DESIGN.md
+[0m→ [0mRead PLAN.md
+[0m→ [0mRead orchestration/tickets/T08.md
+[0m✗ [0mRead BarWidget.qml failed
+[91m[1mError: [0mFile not found: /home/prakhar/Work/tries/2026-09-15-omafan/BarWidget.qml
+[0m✱ [0mGlob "**/omaplug/**/*.qml"[90m in /home/prakhar/.config/omarchy/plugins[0m
+[0m✱ [0mGlob "**/*.qml"[90m in .[0m
+I detect implementation intent — T08 is a single-file QML creation. Let me examine reference QML files for import patterns before writing.
+[0m→ [0mRead /home/prakhar/.config/omarchy/plugins/omaplug/BarWidget.qml
+[0m→ [0mRead /usr/share/omarchy/shell/Commons/Style.qml[90m [limit=50][0m
+[0m→ [0mRead /usr/share/omarchy/shell/Commons/Color.qml[90m [limit=30][0m
+[0m→ [0mRead /home/prakhar/.config/omarchy/plugins/omaplug/Panel.qml[90m [limit=80][0m
+[0m✱ [0mGrep "Style\.space\(|Style\.font\."[90m in /home/prakhar/.config/omarchy/plugins/omaplug[0m
+Now I have all the context. Let me create the file.
+[0m
+[0m← [0mWrite KeyboardHelp.qml
+Wrote file successfully.
+[0m
+File written. Now running the gate: `tests/qml-lint.sh`.
+[0m$ [0mbash /home/prakhar/Work/tries/2026-09-15-omafan/tests/qml-lint.sh 2>&1
+PASS qml-lint: 1 file(s) clean; 15 expected non-fatal warning(s) about qs.* members
+[0m
+Gate passes. Let me verify the rows match DESIGN.md §6.3 by re-reading the file.
+[0m→ [0mRead KeyboardHelp.qml
+```
+TICKET: T08
+FILES: KeyboardHelp.qml:96
+GATES: tests/qml-lint.sh -> PASS qml-lint: 1 file(s) clean; 15 expected non-fatal warning(s) about qs.* members
+EVIDENCE: Rows match DESIGN.md §6.3 one-for-one:
+  ["j / ↓", "cursor down (section)"]
+  ["k / ↑", "cursor up (section)"]
+  ["h / ←", "presets: previous · slider: −1 step"]
+  ["l / →", "presets: next · slider: +1 step"]
+  ["Shift+h/l", "slider: ±500 rpm"]
+  ["Enter / Space", "apply focused preset or slider value"]
+  ["1 … 6", "apply auto, off, low, med, high, full"]
+  ["c", "cycle presets forward"]
+  ["r", "refresh status now"]
+  ["?", "toggle this key map"]
+  ["Esc", "close help, or close panel"]
+  ["Tab", "switch to next/previous bar panel"]
+DECISIONS: Followed omaplug Panel.qml import patterns (QtQuick + qs.Commons); used Style.space/Style.font.* for all sizing; used Text.PlainText throughout; no timers, no I/O, no key stealing. The "?" and "Esc" actions listed in the map are informational only — Panel.qml handles the actual key events per WORKER.md instructions.
+OPEN: none
+```
