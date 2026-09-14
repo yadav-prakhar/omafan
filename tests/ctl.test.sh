@@ -225,7 +225,9 @@ assert_eq "$expected_ids" "$(jget "$out" '[.checks[].id] | sort | join(",")')" \
     "the check id set is exactly section 4.4 plus pkexec_write_path"
 assert_eq "1" "$(jget "$out" '[.checks[] | select(.id == "pkexec_write_path")] | length')" \
     "the pkexec_write_path check is present"
-assert_eq "1" "$(jget "$out" '[.checks[] | select(.id == "pkexec_write_path" and (.status | test("^(PASS|WARN|FAIL)$")))] | length')" \
+pw_valid='[.checks[] | select(.id == "pkexec_write_path"'
+pw_valid+=' and (.status | test("^(PASS|WARN|FAIL)$")))] | length'
+assert_eq "1" "$(jget "$out" "$pw_valid")" \
     "pkexec_write_path status is one of PASS, WARN or FAIL"
 assert_eq "WARN" "$(jget "$out" '.checks[] | select(.id == "pkexec_write_path") | .status')" \
     "pkexec_write_path is WARN under --pkexec none (T04d D4)"

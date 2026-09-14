@@ -142,6 +142,19 @@ Exit codes (frozen; a bad flag never exits 0):
 | 8 | refused as an undercooling risk (§5.1) — writes refused; `--force` overrides |
 
 Write path: `pkexec <afanctl> hold <rpm>` / `pkexec <afanctl> observe`.
+**The runner argv is exactly `[<runner>, <afanctl>, <verb> (, <rpm>)]`** — nothing
+between the runner and the binary (REVIEW-R2 R2-1, ruling R7: afanctl's polkit
+rule re-checks `program == /usr/bin/afanctl` and the exact argv, so an
+`env VAR=…` wrapper makes the rule NOT_HANDLED and pkexec falls back to a
+password prompt that no script, chord or panel can answer; verified live,
+0.026 s bare vs. hang). Consequently a custom `--runtime-dir` cannot be carried
+through a runner: with `--pkexec` other than `none` and a runtime dir that is not
+afanctl's default (`/run/afanctl`), writes are refused with exit 2 and a message
+naming both fixes. Reads are unaffected. Every runner call is bounded (a timeout
+becomes exit 3, "authorisation timed out or was cancelled"), and a **stale
+`state.json` refuses a write with exit 5** unless `--force` (R2-3): `state.json`
+is rewritten every poll, so an age above the staleness floor means the daemon is
+not reporting and the command would sit latent in `cmd.json`.
 `--dry-run` prints the argv it *would* run and exits 0 without executing.
 `status`/`presets`/`doctor` never write, never call pkexec, and never require root.
 Notifications use `notify-send` when available; a missing/failing `notify-send`
@@ -223,7 +236,10 @@ human line to stderr — never the reverse.
 
 Check ids (fixed): `afanctl_present`, `afanctl_version`, `daemon_running`,
 `state_fresh`, `pkexec_present`, `polkit_rule`, `applesmc`, `coretemp`,
-`hw_limits`, `shell_ipc`, `keybindings`. Any `FAIL` ⇒ exit 1. `WARN` never
+`hw_limits`, `shell_ipc`, `keybindings`, `pkexec_write_path` (added by ruling R7:
+it runs the authorized read `[<runner>, <afanctl>, status, --json]` under a 3 s
+deadline, so a polkit mismatch shows up as a FAIL from `doctor` instead of as a
+hang at key-press time). Any `FAIL` ⇒ exit 1. `WARN` never
 fails the exit code. `status` ∈ `PASS|WARN|FAIL`.
 
 ### 4.5 `cycle` semantics
@@ -428,9 +444,12 @@ Rules:
 - If the daemon is missing/stopped/stale, the panel shows an offline banner with
   the exact `systemctl` command and keeps read-only behaviour.
 - `release_after_minutes` (plugin setting, default `0` = never) returns the fan
-  to firmware auto after N minutes of no interaction — an optional safety net
-  for a forgotten hold. Its timer restarts when a status poll discovers an active
-  hold and the setting is non-zero.
+  to firmware auto after N minutes without interaction — an optional safety net
+  for a forgotten hold. **Arming is edge-triggered** (REVIEW-R2 R2-2, ruling R7):
+  the countdown starts when a poll first discovers an active hold and restarts on
+  every genuine user action; it is *not* restarted on every poll, because a
+  one-shot timer restarted every ≤10 s could never reach an interval of ≥1 minute
+  and the net would never fire. The interval is clamped to ≥60 s.
 - **Undercooling guard** (DESIGN.md §5.1): on a hot machine, a preset that holds
   the fan below its current speed needs a deliberate second confirmation. The
   plugin never quietly reduces airflow the firmware had already raised.

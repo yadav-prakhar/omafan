@@ -37,6 +37,9 @@ Panel {
   // T09c D3: true when a status poll failed or was killed at its deadline —
   // the previous document stays rendered but is visibly marked as stale.
   property string focusSection: "presets"   // "presets" | "slider" (DESIGN.md 6.2)
+  // REVIEW-R2 R2-2: true while a hold has been seen and the release net armed,
+  // so the net arms on the rising edge instead of being restarted every poll.
+  property bool holdSeen: false
   property int selectedIndex: 0             // slider uses the -1 sentinel
   property bool cursorActive: false
   property bool helpOpen: false
@@ -266,6 +269,10 @@ Panel {
     cmdProc.command = root.withGlobalFlags([root.ctlPath].concat(args))
     cmdProc.running = true
     commandDeadline.restart()
+    // REVIEW-R2 R2-2: every genuine user action restarts the release net's
+    // countdown, which is what "release after N minutes without interaction"
+    // promises. The timer is not started here — applyStatus owns arming.
+    if (root.releaseAfterMinutes > 0 && root.holdActive) releaseTimer.restart()
   }
 
   // The undercooling confirmation (DESIGN.md 5.1): a hot-machine preset below
@@ -352,10 +359,22 @@ Panel {
           && root.holdDoc.rpm !== null && root.holdDoc.rpm !== undefined) {
         root.pendingRpm = root.holdDoc.rpm
       }
-      // release_after_minutes: restart whenever a poll discovers a hold and
-      // the setting is non-zero (DESIGN.md 8).
-      if (root.releaseAfterMinutes > 0 && root.holdActive) releaseTimer.restart()
-      else releaseTimer.stop()
+      // release_after_minutes: arm on the hold's RISING EDGE only. Arming on
+      // every poll (the original implementation) restarted a one-shot timer
+      // every <=10 s, so an interval of >=1 minute could never elapse and the
+      // safety net never fired — the only state it exists to catch
+      // (REVIEW-R2 R2-2). `holdSeen` makes the arming edge-triggered, and
+      // sendCommand() restarts the countdown on genuine user interaction, which
+      // is what "without interaction" means.
+      if (root.releaseAfterMinutes > 0 && root.holdActive) {
+        if (!root.holdSeen) {
+          root.holdSeen = true
+          releaseTimer.restart()
+        }
+      } else {
+        root.holdSeen = false
+        releaseTimer.stop()
+      }
     } else {
       // T09c D3: a failed poll keeps the previous document rendered but marks
       // it stale, so the numbers are visibly old and the poll timer keeps
@@ -530,11 +549,17 @@ Panel {
 
   Timer {
     id: releaseTimer
-    readonly property int minuteMs: root.releaseAfterMinutes > 0 ? root.releaseAfterMinutes * 60000 : 0
-    interval: minuteMs
-    running: minuteMs > 0
+    // REVIEW-R2 R2-2: one-shot, started/stopped only from applyStatus (rising
+    // edge) and sendCommand (user interaction). The interval is clamped to at
+    // least a minute so a mis-set 0 can never fire an immediate release.
     repeat: false
-    onTriggered: root.sendCommand(["release"])
+    interval: root.releaseAfterMinutes > 0
+      ? Math.max(60000, root.releaseAfterMinutes * 60000)
+      : 0
+    onTriggered: {
+      root.holdSeen = false
+      if (root.holdActive) root.sendCommand(["release"])
+    }
   }
 
   // ------------------------------------------------------------- lifecycle

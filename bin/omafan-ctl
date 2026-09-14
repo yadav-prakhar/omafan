@@ -541,6 +541,15 @@ write_prereqs() {
         fail_action 5 daemon_down \
             "daemon not running or state.json at $runtime_dir unreadable. $FIX_RESTART_AC"
     fi
+    # REVIEW-R2 R2-3: a write that cannot tell whether the daemon is alive must
+    # not report success. state.json is rewritten on every poll (1 s by default),
+    # so a file older than the staleness floor means the daemon is not reporting;
+    # the command would sit latent in cmd.json and be applied whenever the daemon
+    # came back. Refuse (exit 5, the daemon-down code) unless --force.
+    if [ "$want_force" != "true" ] && is_state_stale "$ST_AGE"; then
+        fail_action 5 daemon_down \
+            "state.json is ${ST_AGE}s old (limit ${STALE_AFTER_S}s), so the daemon is not reporting and the write would not be applied yet. $FIX_RESTART_AC"
+    fi
     if [ "$want_force" != "true" ]; then
         if [ "$ST_MONITOR_ONLY" = "true" ]; then
             fail_action 6 monitor_only \
