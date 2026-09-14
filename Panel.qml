@@ -37,6 +37,12 @@ Panel {
   // T09c D3: true when a status poll failed or was killed at its deadline —
   // the previous document stays rendered but is visibly marked as stale.
   property string focusSection: "presets"   // "presets" | "slider" (DESIGN.md 6.2)
+  // T09c D3 (declaration restored by REVIEW-R1 R1-1): true when a status poll
+  // failed or was killed at its deadline. This property was *used* by
+  // applyStatus/statusDeadline/the stale banner but never declared, so every
+  // poll threw a TypeError mid-function and the panel never applied a status
+  // document — a runtime-fatal defect that was green on every automated gate.
+  property bool statusStale: false
   // REVIEW-R2 R2-2: true while a hold has been seen and the release net armed,
   // so the net arms on the rising edge instead of being restarted every poll.
   property bool holdSeen: false

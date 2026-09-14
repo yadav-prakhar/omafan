@@ -324,10 +324,42 @@ read_state() {
 is_state_stale() {
     # Unknown or negative ages count as stale: trusting a timestamp we could
     # not read is the unsafe direction.
+    # REVIEW-R1 R1-2: an optional second argument overrides the flat floor.
+    # Callers that know the daemon's poll interval pass max(5 s, 3 x interval)
+    # as DESIGN §4.1 specifies; without it a healthy but slow-polling daemon
+    # (interval_s > ~1.6 s) would be misreported as stale and its writes
+    # refused.
+    local limit="${2:-$STALE_AFTER_S}"
     case "${1:-}" in
         '' | *[!0-9]*) return 0 ;;
     esac
-    [ "$1" -gt "$STALE_AFTER_S" ]
+    [ "$1" -gt "$limit" ]
+}
+
+# stale_threshold -> the staleness limit in seconds: max(5, 3 x the daemon's
+# poll interval), per DESIGN §4.1 (REVIEW-R1 R1-2). The interval is cached from
+# `afanctl status --json`'s config.interval_s; when it is unknown the flat 5 s
+# floor applies, which is the conservative direction on the reference machine
+# (interval_s = 1 -> 5 s).
+stale_threshold() {
+    local cache="$hw_cache_file"
+    if [ -z "$cache" ]; then
+        local primary="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/omafan/hw.json"
+        [ -r "$primary" ] && cache="$primary"
+    fi
+    local interval=""
+    if [ -n "$cache" ] && [ -r "$cache" ]; then
+        interval="$(jq -r '.interval_s // empty' -- "$cache" 2>/dev/null || printf '')"
+    fi
+    case "$interval" in
+        '' | *[!0-9]*) printf '%s' "$STALE_AFTER_S" ;;
+        *)
+            local triple=$((3 * interval))
+            if [ "$triple" -gt "$STALE_AFTER_S" ]; then printf '%s' "$triple"
+            else printf '%s' "$STALE_AFTER_S"
+            fi
+            ;;
+    esac
 }
 
 load_limits() {
@@ -529,6 +561,10 @@ write_prereqs() {
     if [ "$want_dry_run" = "true" ]; then
         return 0
     fi
+    # REVIEW-R1 R1-2: the staleness limit is max(5 s, 3 x the daemon's poll
+    # interval), and the interval lives in the limits cache — so make sure the
+    # cache has been loaded (it is cheap and TTL-guarded) before it is consulted.
+    load_limits >/dev/null 2>&1 || true
     if ! afanctl_path >/dev/null; then
         fail_action 4 afanctl_missing "$(msg_afanctl_missing)"
     fi
@@ -558,9 +594,9 @@ write_prereqs() {
     # so a file older than the staleness floor means the daemon is not reporting;
     # the command would sit latent in cmd.json and be applied whenever the daemon
     # came back. Refuse (exit 5, the daemon-down code) unless --force.
-    if [ "$want_force" != "true" ] && is_state_stale "$ST_AGE"; then
+    if [ "$want_force" != "true" ] && is_state_stale "$ST_AGE" "$(stale_threshold)"; then
         fail_action 5 daemon_down \
-            "state.json is ${ST_AGE}s old (limit ${STALE_AFTER_S}s), so the daemon is not reporting and the write would not be applied yet. $FIX_RESTART_AC"
+            "state.json is ${ST_AGE}s old (limit $(stale_threshold)s), so the daemon is not reporting and the write would not be applied yet. $FIX_RESTART_AC"
     fi
     if [ "$want_force" != "true" ]; then
         if [ "$ST_MONITOR_ONLY" = "true" ]; then
@@ -896,7 +932,7 @@ run_presets() {
     presets_json="$(build_presets_json)"
     if [ "$output_mode" = "human" ]; then
         printf 'band: %s%s..%s (step 100)\n' "" "$hw_min" "$hw_max"
-        printf '%s\n' "$presets_json" | jq -r '.[] | "\(.id)\t\(.label)\t\(if .rpm == null then "-" else tostring end)\t\(.kind)"'
+        printf '%s\n' "$presets_json" | jq -r '.[] | "\(.id)\t\(.label)\t\(if .rpm == null then "-" else (.rpm | tostring) end)\t\(.kind)"'
         exit 0
     fi
     jq -cn --arg schema "$PRESETS_SCHEMA" --argjson min "$hw_min" --argjson max "$hw_max" \
@@ -946,9 +982,9 @@ run_doctor() {
 
     if read_state; then
         add_check daemon_running PASS "state.json present at $runtime_dir (mode $ST_MODE)"
-        if is_state_stale "$ST_AGE"; then
+        if is_state_stale "$ST_AGE" "$(stale_threshold)"; then
             add_check state_fresh FAIL \
-                "state.json is ${ST_AGE}s old (limit ${STALE_AFTER_S}s); $FIX_RESTART_AC"
+                "state.json is ${ST_AGE}s old (limit $(stale_threshold)s); $FIX_RESTART_AC"
         else
             add_check state_fresh PASS "state.json is ${ST_AGE}s old"
         fi
