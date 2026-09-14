@@ -1,26 +1,29 @@
 # REVIEW-R2 — adversarial review: safety, privilege, collisions, failure modes
 
 **Ticket:** T16 · **Reviewer:** glm 5.3 high · **Date:** 2026-09-15 ~04:30 IST
-**Tree audited** (it moved three times during the review; claims are pinned to):
+**Tree audited** (it moved four times during the review; claims are pinned to):
 `bin/omafan-ctl` md5 `c5bc8c7ca55d` (04:27:24, post-T04d) · `Panel.qml` `0cab89b11d6c`
 (04:23:44, post-T09c) · `bin/omafan-keybindings` `f06dc7b9211d` · `BarWidget.qml`
 `247982167b76` · `Model.js` `c5fa4954bb6d` · `KeyboardHelp.qml` `5decf6152f81` ·
-`tests/ctl.test.sh` `7031d15c7f2d`. All omafan-ctl runs below used
+`tests/ctl.test.sh` `7031d15c7f2d` (pre-T05b; see R2-4). **Hand-off re-check:**
+`bin/omafan-ctl` still `c5bc8c7ca55d`; T05b replaced `tests/ctl.test.sh`
+(`13432670…`) and `tests/run-all.sh` now exits 0 with 6/6 suites PASS — R2-4 is
+closed, R2-2/R2-3/R2-5 unaffected (write_prereqs and DESIGN.md are byte-identical
+to the audited state). All omafan-ctl runs below used
 `--afanctl tests/fixtures/fake-afanctl --pkexec none --runtime-dir <tempdir>` with
 `XDG_RUNTIME_DIR` redirected into the tempdir (two zero-execution exceptions, disclosed
 in R2-1). No git, no sudo, no writes outside `orchestration/REVIEW-R2.md`.
 
 ## Verdict
 
-**REJECT at this commit — 2 blockers open, 1 gate red.** The blast radius is small and
-the privilege boundary is now genuinely tight, but: the `release_after_minutes` safety
-net can never fire (R2-2), writes on a stale `state.json` succeed untruthfully (R2-3),
-and `tests/run-all.sh` exits 1 because T04d's correct code changes were never mirrored
-into T05's frozen assertions or into `DESIGN.md` (R2-4/R2-5). The one true security
-blocker this review found independently — the privileged argv `env`-indirection that
-made every pkexec write unable to match afanctl's polkit rule — was fixed by T04d
-*while this review was running*; the fix is verified below and the residual is the
-un-mirrored contract, not the code.
+**REJECT until R2-2 is fixed — 1 blocker open, 2 should-fix open.** The blast radius
+is small and the privilege boundary is now genuinely tight, but the
+`release_after_minutes` safety net can never fire (R2-2), writes on a stale
+`state.json` succeed untruthfully (R2-3), and the T04d/T09c behaviour changes are
+still un-mirrored in `DESIGN.md`/`DEVIATIONS.md` (R2-5). Two further blockers this
+review observed live — the privileged-argv polkit mismatch (R2-1) and the red build
+gate it caused (R2-4) — were fixed by concurrent tickets T04d/T05b *while this review
+was running*; both fixes are verified below against the current tree.
 
 ## Findings
 
@@ -101,10 +104,10 @@ and not `--force` → `fail_action 5 daemon_down "state.json is Ns stale — the
 not reporting; $FIX_RESTART_AC"`; add a ctl.test.sh case (seed state, `touch -d '2
 minutes ago'`, expect exit 5 and empty argv.log).
 
-### R2-4 — blocker for the build gate (open; trivial fix)
+### R2-4 — blocker for the build gate (observed open; CLOSED during the review window by T05b, verified)
 
-**`tests/run-all.sh` is red at the audited HEAD: T04d changed behaviour T05's frozen
-assertions still pin.**
+**`tests/run-all.sh` was red at the audited HEAD: T04d changed behaviour T05's frozen
+assertions still pinned.**
 ```
 bash tests/run-all.sh -> RUN ctl FAIL:  "doctor emits the eleven fixed checks:
   expected [11], got [12"; "the check id set is exactly section 4.4: … got […
@@ -115,10 +118,12 @@ Causes: doctor now has a 12th check (`pkexec_write_path`, T04d D4 — an intenti
 good change), and the D2 custom-runtime-dir refusal (exit 2) now precedes the
 pkexec-denied path (exit 3) that `run_denied` exercises. T04d owned only
 `bin/omafan-ctl`, so `tests/ctl.test.sh` (T05's file) was not updated; its own gate 6
-("suite still passes") is not met. PRD G3 cannot pass until the suite is updated.
-**Smallest fix:** in tests/ctl.test.sh, expected count 11→12, add `pkexec_write_path`
-to the expected id set, and make `run_denied` keep the default runtime dir (or use
-`--pkexec none` + a failing afanctl stub) so it still reaches the exit-3 path.
+("suite still passes") was not met, and PRD G3 could not pass.
+**Closed and verified:** T05b (dispatched while this review ran) updated the suite —
+hand-off re-run: `bash tests/run-all.sh` → `PASS suites 6 / FAIL suites 0`, exit 0,
+`tests/ctl.test.sh` md5 `13432670…`. The drift itself remains a live risk as long as
+R2-5 (contract mirroring) is open. Note for T05b's successor: the suite still has no
+stale-state *write* case — see R2-3.
 
 ### R2-5 — should-fix (open; contract discipline)
 
