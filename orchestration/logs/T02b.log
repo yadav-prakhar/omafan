@@ -1,0 +1,135 @@
+=== dispatch T02b model=opencode-go/deepseek-v4.1-flash variant=default at 2026-09-15T03:26:28+05:30
+[0m
+> Sisyphus - ultraworker · deepseek-v4.1-flash
+[0m
+[0m→ [0mRead orchestration/instructions/WORKER.md
+I'll read the required files first.
+[0m→ [0mRead PRD.md
+[0m→ [0mRead PLAN.md
+[0m→ [0mRead DESIGN.md
+[0m→ [0mRead orchestration/tickets/T02b.md
+[0m→ [0mRead Model.js
+[0m→ [0mRead tests/model.test.mjs
+Now let me read the existing files I own.
+[0m
+[0m$ [0mls -la /home/prakhar/Work/tries/2026-09-15-omafan /home/prakhar/Work/tries/2026-09-15-omafan/tests /home/prakhar/Work/tries/2026-09-15-omafan/tests/lib 2>&1
+/home/prakhar/Work/tries/2026-09-15-omafan:
+total 132
+drwxr-xr-x 1 prakhar prakhar   248 Sep 15 03:26 .
+drwxr-xr-x 1 prakhar prakhar   100 Sep 15 02:46 ..
+drwxr-xr-x 1 prakhar prakhar     0 Sep 15 03:14 bin
+-rw-r--r-- 1 prakhar prakhar 24084 Sep 15 03:22 DESIGN.md
+-rw-r--r-- 1 prakhar prakhar   158 Sep 15 03:16 DEVIATIONS.md
+drwxr-xr-x 1 prakhar prakhar     0 Sep 15 03:14 docs
+drwxr-xr-x 1 prakhar prakhar   176 Sep 15 03:26 .git
+-rw-r--r-- 1 prakhar prakhar     8 Sep 15 03:21 .gitignore
+-rw-r--r-- 1 prakhar prakhar 35149 Sep 15 03:14 LICENSE
+-rw-r--r-- 1 prakhar prakhar  1202 Sep 15 03:22 manifest.json
+-rw-r--r-- 1 prakhar prakhar  9325 Sep 15 03:24 Model.js
+drwxr-xr-x 1 prakhar prakhar    32 Sep 15 03:25 .omo
+drwxr-xr-x 1 prakhar prakhar    86 Sep 15 03:21 orchestration
+-rw-r--r-- 1 prakhar prakhar 26410 Sep 15 03:26 PLAN.md
+-rw-r--r-- 1 prakhar prakhar 16136 Sep 15 03:15 PRD.md
+-rw-r--r-- 1 prakhar prakhar   447 Sep 15 03:24 QUESTIONS.md
+drwxr-xr-x 1 prakhar prakhar    84 Sep 15 03:13 .recon
+drwxr-xr-x 1 prakhar prakhar   160 Sep 15 03:26 tests
+
+/home/prakhar/Work/tries/2026-09-15-omafan/tests:
+total 32
+drwxr-xr-x 1 prakhar prakhar   160 Sep 15 03:26 .
+drwxr-xr-x 1 prakhar prakhar   248 Sep 15 03:26 ..
+drwxr-xr-x 1 prakhar prakhar   170 Sep 15 03:24 fixtures
+drwxr-xr-x 1 prakhar prakhar    20 Sep 15 03:24 lib
+-rwxr-xr-x 1 prakhar prakhar  3216 Sep 15 03:26 manifest.test.sh
+-rw-r--r-- 1 prakhar prakhar 15331 Sep 15 03:24 model.test.mjs
+-rwxr-xr-x 1 prakhar prakhar   719 Sep 15 03:23 plugin-validate.sh
+-rwxr-xr-x 1 prakhar prakhar  1679 Sep 15 03:23 qml-lint.sh
+-rwxr-xr-x 1 prakhar prakhar  2117 Sep 15 03:22 run-all.sh
+
+/home/prakhar/Work/tries/2026-09-15-omafan/tests/lib:
+total 8
+drwxr-xr-x 1 prakhar prakhar   20 Sep 15 03:24 .
+drwxr-xr-x 1 prakhar prakhar  160 Sep 15 03:26 ..
+-rwxr-xr-x 1 prakhar prakhar 6823 Sep 15 03:24 harness.sh
+[0m
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && node tests/model.test.mjs; echo "exit=$?"
+PASS 124 / FAIL 0
+exit=0
+[0m
+[0m$ [0mcd /home/prakhar/Work/tries/2026-09-15-omafan && cat orchestration/QUESTIONS.md DEVIATIONS.md 2>&1; echo ---; cat tests/run-all.sh
+cat: orchestration/QUESTIONS.md: No such file or directory
+# DEVIATIONS.md — proposed changes to frozen contracts
+
+Every entry: `D<n> — <item> — old → new — why — affected tickets — ruling`.
+
+(none yet)
+---
+#!/usr/bin/env bash
+# tests/run-all.sh — the hardware-free gate. Every suite here must pass on any
+# machine: no fan writes, no /sys, no root, no network. Live suites are separate
+# and opt-in (tests/integration-shell.sh, tests/hw-smoke.sh).
+#
+# Usage: tests/run-all.sh [--list]
+set -uo pipefail
+
+repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo" || exit 1
+
+pass_suites=0
+fail_suites=0
+skip_suites=0
+failed_names=()
+
+run_suite() {
+    local name="$1"
+    local present="$2"
+    shift 2
+    if [[ ! -e "$present" ]]; then
+        printf 'SKIP  %-22s (not present yet)\n' "$name"
+        skip_suites=$((skip_suites + 1))
+        return 0
+    fi
+    printf 'RUN   %-22s ' "$name"
+    local out
+    if out="$("$@" 2>&1)"; then
+        printf 'PASS\n'
+        pass_suites=$((pass_suites + 1))
+    else
+        printf 'FAIL\n'
+        fail_suites=$((fail_suites + 1))
+        failed_names+=("$name")
+        printf '%s\n' "$out" | tail -25 | sed 's/^/      | /'
+    fi
+}
+
+if [[ ${1:-} == --list ]]; then
+    echo "plugin-validate manifest.test.sh model.test.mjs ctl.test.sh keybindings.test.sh qml-lint.sh"
+    exit 0
+fi
+
+echo "omafan test suite — $(date -Is)"
+echo "repo: $repo"
+echo
+
+# 1. manifest + schema + repository layout (omarchy's own validator)
+run_suite "plugin-validate" bash tests/plugin-validate.sh tests/plugin-validate.sh
+# 2. manifest-level assertions we make ourselves
+run_suite "manifest" bash tests/manifest.test.sh tests/manifest.test.sh
+# 3. pure logic of Model.js
+run_suite "model" node tests/model.test.mjs tests/model.test.mjs
+# 4. the privileged CLI against the afanctl fixture
+run_suite "ctl" bash tests/ctl.test.sh tests/ctl.test.sh
+# 5. the keybinding block installer against a stubbed Hyprland
+run_suite "keybindings" bash tests/keybindings.test.sh tests/keybindings.test.sh
+# 6. QML lint against the installed shell
+run_suite "qml-lint" bash tests/qml-lint.sh tests/qml-lint.sh
+
+echo
+echo "PASS suites ${pass_suites} / FAIL suites ${fail_suites} / SKIP ${skip_suites}"
+if [[ $fail_suites -gt 0 ]]; then
+    printf 'failed: %s\n' "${failed_names[*]}"
+    exit 1
+fi
+exit 0
+[0m
+T02 already produced Model.js (17 functions) and its test suite. T02b is additive: two §5.1 functions plus tests. Let me get a baseline before editing.

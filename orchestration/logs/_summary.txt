@@ -1,3 +1,0 @@
-T02 model=opencode-go/deepseek-v4.1-flash exit=0
-T01 model=opencode-go/mimo-v2.5 exit=0
-T03 model=opencode-go/deepseek-v4.1-flash exit=0

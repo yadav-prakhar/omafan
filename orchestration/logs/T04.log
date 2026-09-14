@@ -1,0 +1,24 @@
+=== dispatch T04 model=opencode-go/glm-5.3-flash variant=high at 2026-09-15T03:26:28+05:30
+[0m
+> Sisyphus - ultraworker · glm-5.3-flash
+[0m
+[0m→ [0mRead PRD.md
+[0m→ [0mRead orchestration/instructions/WORKER.md
+[0m→ [0mRead DESIGN.md
+[0m→ [0mRead PLAN.md
+I read this as implementation: execute ticket T04 per the orchestration docs.
+[0m→ [0mRead orchestration/tickets/T04.md
+[0m
+[0m# [0mTodos
+[•] Read T03 fixtures (fake-afanctl, state/status JSON) to match their shapes
+[ ] bin/omafan-ctl: implement verbs status/presets/doctor/preset/rpm/release per DESIGN.md §4+§5.1
+[ ] Gate: bash -n bin/omafan-ctl
+[ ] Gate: hand-run transcript (status/presets/doctor --json, preset med --dry-run, rpm 99999 exit 7, preset bogus exit 2) against fake-afanctl
+[ ] Report in WORKER.md format
+[0m
+[0m→ [0mRead tests/fixtures/fake-afanctl
+[0m→ [0mRead tests/fixtures/state-hold.json
+[0m→ [0mRead tests/fixtures/state-monitor-only.json
+[0m→ [0mRead tests/fixtures/status-observe.json
+[0m→ [0mRead tests/fixtures/status-hold.json
+[0m→ [0mRead Model.js
