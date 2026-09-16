@@ -5,6 +5,40 @@ All notable changes to omafan will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The bar widget's hold tint follows the theme again — Omarchy's `bar.urgent` /
+  `Color.urgent` "active" colour (red on the reference theme) instead of a
+  hard-coded green `#5a995a`. The tint appears only while a hold is active.
+- `tests/keybindings.test.sh` asserted the pre-rename floor chord description
+  (`omafan: fans off (floor)`). It now matches the helper, `DESIGN.md` §7 and
+  `docs/KEYBINDINGS.md` (`omafan: fans floor`), so the gate is green on a clean
+  tree again.
+
+### Added
+
+- `CONTRIBUTING.md` — the gate, branch naming, commit conventions, the
+  frozen-contract procedure and the code conventions per language.
+- `SECURITY.md` — what security means for a fan controller (privilege boundary,
+  `/sys`, refusal model, fan safety), how to report, supported versions.
+- `skills/` — five task-shaped procedures for agents working in this repo:
+  `run-the-gates`, `live-verify-in-the-shell`, `change-a-frozen-contract`,
+  `capture-docs-screenshots`, `publish-a-release`.
+- `.github/` — a PR template that mirrors the review checklist, and an issue
+  template that asks for the hardware/version/`doctor` evidence.
+
+### Changed
+
+- `README.md` — refreshed hero and section screenshots taken from the current
+  build (the previous hero showed the older `Off (floor)` label), a scannable
+  feature table, and new Development and Contributing sections.
+- `AGENTS.md` files revalidated against the tree: structure and mirror rules
+  updated, the LEDGER line format corrected to em dashes, the test flag note
+  corrected (`hw-smoke.sh` is `set -euo pipefail` too), and the
+  chord-description mirror trap recorded in `bin/` and `tests/`.
+
 ## [1.0.0] - 2026-09-15
 
 ### Added
@@ -33,3 +67,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GPL-3.0-only licence.
 
 [1.0.0]: https://github.com/yadav-prakhar/omafan/releases/tag/v1.0.0
+[Unreleased]: https://github.com/yadav-prakhar/omafan/compare/v1.0.0...HEAD

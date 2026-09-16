@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Install and troubleshooting guide
+    url: https://github.com/yadav-prakhar/omafan/blob/master/docs/TROUBLESHOOTING.md
+    about: Start with `omafan-ctl doctor --human`; most failures name their own fix.
+  - name: Safety model
+    url: https://github.com/yadav-prakhar/omafan/blob/master/docs/SAFETY.md
+    about: What omafan writes, what it refuses, and the privilege boundary.
+  - name: Plugin wiki
+    url: https://github.com/yadav-prakhar/omafan/wiki
+    about: Screenshots, the panel and key maps, CLI reference.
