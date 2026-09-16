@@ -2,10 +2,11 @@
 
 # omafan
 
-[![Built for Omarchy: Plugin](https://raw.githubusercontent.com/tcballard/omarchy-badges/75975e5b5bf75e7ede3764bcd2950046f7abfe2c/badges/v1/omarchy-plugin.svg)](https://github.com/tcballard/omarchy-badges) [![Supported Omarchy versions: 4.0.0+](https://raw.githubusercontent.com/tcballard/omarchy-badges/dd84bb21f19caf617caa5b3c1af7ff3c6cb847c3/badges/v1/compatibility/omarchy-4.0.0-plus.svg)](https://github.com/tcballard/omarchy-badges)
+[![Built for Omarchy: Plugin](https://raw.githubusercontent.com/tcballard/omarchy-badges/75975e5b5bf75e7ede3764bcd2950046f7abfe2c/badges/v1/omarchy-plugin.svg)](https://github.com/tcballard/omarchy-badges) [![Supported Omarchy versions: 4.0.0+](https://raw.githubusercontent.com/tcballard/omarchy-badges/dd84bb21f19caf617caa5b3c1af7ff3c6cb847c3/badges/v1/compatibility/omarchy-4.0.0-plus.svg)](https://github.com/tcballard/omarchy-badges) [![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
 
-<img width="768" height="760" alt="screenshot-2026-09-16_11-35-03" src="https://github.com/user-attachments/assets/442c4504-f30f-4705-8872-abde10cee24a" />
+<img width="620" alt="the omafan panel: fan rpm and CPU temperature, six presets, an RPM slider" src="preview.png" />
 
+*Captured on the reference machine (MacBookPro14,1 "A1708"), fan in firmware auto.*
 
 </div>
 
@@ -19,19 +20,13 @@ MacBookPro14,1 "A1708"). It never touches `/sys` itself: the installed
 **afanctl** daemon owns the fan, and omafan is a control surface over that
 daemon's documented command channel.
 
-- **Bar widget** — live CPU temperature and/or fan RPM, tinted whenever the fan
-  is held off the firmware curve.
-- **Panel** — `Auto · Floor (hardware floor) · Low · Medium · High · Full`, an RPM
-  slider, live status, banners for degraded/offline states, and an in-panel key
-  map on `?`.
-- **Keyboard-first** — the whole panel works without a pointer, and eight global
-  chords for the panel plus every preset were verified free against the live
-  compositor bindings.
-- **CLI** — `bin/omafan-ctl` exposes the same surface headlessly with JSON output
-  and documented exit codes.
-- **Zero new privilege surface** — no udev rule, no sudoers entry, no root-owned
-  helper, no `/sys` writes. omafan reuses afanctl's existing auditable polkit
-  rule.
+| | |
+|---|---|
+| **Bar widget** | live CPU temperature, fan rpm, or both — tinted whenever the fan is held off the firmware curve |
+| **Panel** | `Auto · Floor · Low · Medium · High · Full`, an RPM slider, live status, and banners that name the exact fix when something is wrong |
+| **Keyboard-first** | the whole panel works without a pointer, plus eight global chords for the panel and every preset |
+| **CLI** | `bin/omafan-ctl` exposes the same surface headlessly, with JSON output and documented exit codes |
+| **Zero new privilege surface** | no udev rule, no sudoers entry, no root-owned helper, no `/sys` write — omafan reuses afanctl's existing auditable polkit rule |
 
 ## Requirements
 
@@ -112,6 +107,10 @@ The widget text is tinted whenever a hold is active, so a forgotten manual
 setting is visible at a glance. It shows one of `icon`, `temp` (default),
 `rpm` or `temp+rpm` — see [Settings](#settings).
 
+<img width="520" alt="the omafan bar widget showing 77 °C · 1,218 rpm" src="docs/images/bar-widget.png" />
+
+*The widget with `show=temp+rpm`, zoomed. It sits in the right-hand bar section by default.*
+
 ### The panel
 
 Open it by clicking the widget or running `omarchy-shell omafan toggle`. Six
@@ -176,6 +175,10 @@ Everything the pointer can do, a key can do.
 On a hot machine (`t_eff_c >= 80 °C`) a preset that would hold the fan *below
 its current speed* needs a deliberate second `Enter` or click within 10 s — see
 [Safety](#safety-model).
+
+<img width="560" alt="the ? key-map overlay inside the panel" src="docs/images/keymap.png" />
+
+*The `?` overlay, on the running panel.*
 
 ### Global keyboard shortcuts
 
@@ -365,7 +368,66 @@ The full survey, with licences and mechanisms, is in
 | [docs/TESTING.md](docs/TESTING.md) | the hardware-free gate and the opt-in live suites |
 | [docs/PRIOR-ART.md](docs/PRIOR-ART.md) | the sibling survey and the differentiation matrix |
 | [docs/PUBLISHING.md](docs/PUBLISHING.md) | the marketplace submission package |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | branch naming, commit conventions, the gate, the contract rule |
+| [SECURITY.md](SECURITY.md) | what security means here, and how to report an issue |
 | [CHANGELOG.md](CHANGELOG.md) | release history |
+| [Wiki](https://github.com/yadav-prakhar/omafan/wiki) | the same material with screenshots, for browsing |
+
+## Development
+
+There is no build step and no package manager — a checkout *is* the plugin. The
+gate is hardware-free and is the only thing that counts as proof:
+
+```sh
+bash tests/run-all.sh                 # 6 suites: plugin-validate, manifest, model, ctl, keybindings, qml-lint
+bash tests/run-all.sh --list          # the suite names
+omarchy plugin validate .             # the shell's own structural gate
+bash -n bin/omafan-ctl bin/omafan-keybindings
+```
+
+Suites that need a live session or real hardware are opt-in and never part of
+`run-all.sh`:
+
+```sh
+OMAFAN_LIVE=1 tests/integration-shell.sh   # live shell IPC
+OMAFAN_HW=1   tests/hw-smoke.sh            # moves the fan; attended, asks for a typed yes
+```
+
+To check UI changes against a running session, install the working tree into the
+shell's plugin directory and reload:
+
+```sh
+orchestration/live-install.sh install   # backs up shell.json, rsyncs, enables, rescans
+orchestration/live-install.sh verify
+orchestration/live-install.sh remove    # back out
+omarchy-restart-shell                   # when the shell keeps stale QML in memory
+```
+
+`DESIGN.md` is a frozen contract: behaviour changes that contradict it need a
+[DEVIATIONS.md](DEVIATIONS.md) entry first, and the design, docs and tests land
+together.
+
+## Contributing
+
+[CONTRIBUTING.md](CONTRIBUTING.md) is the long version. The short one:
+
+- Branches: `<type>/<slug>` — `feat/`, `fix/`, `docs/`, `test/`, `chore/`, `refactor/`.
+- Commits: [Conventional Commits](https://www.conventionalcommits.org/) with a
+  scope from the file layout — `fix(keybindings): …`, `feat(panel): …`,
+  `docs(readme): …` — imperative subject, 72 characters, and the command you ran
+  in the body as evidence.
+- Never write `/sys`, never add privilege, never add a live suite to the gate.
+- Security reports go through [SECURITY.md](SECURITY.md), not a public issue.
+
+### Working with an AI agent
+
+The repo carries its own agent notes: [AGENTS.md](AGENTS.md) at the root plus
+per-directory notes in [bin/](bin/AGENTS.md), [tests/](tests/AGENTS.md) and
+[orchestration/](orchestration/AGENTS.md). Task-shaped procedures live in
+[`skills/`](skills/) — running the gate, verifying in a live shell, changing a
+frozen contract, capturing documentation screenshots, cutting a release. Point
+your agent at those before it edits, and hold it to the same rules as a human
+patch: real evidence, no invented output, no hardware writes.
 
 ## Licence
 
