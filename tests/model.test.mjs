@@ -134,7 +134,7 @@ eq("presetsFor kinds mark auto as release and the rest as hold",
   ladder.map((p) => p.kind), ["release", "hold", "hold", "hold", "hold", "hold"]);
 eq("presetsFor labels match DESIGN.md §3",
   ladder.map((p) => p.label),
-  ["Auto (firmware)", "Off (hardware floor)", "Low", "Medium", "High", "Full"]);
+  ["Auto (firmware)", "Floor (hardware floor)", "Low", "Medium", "High", "Full"]);
 
 const ladder2 = Model.presetsFor(2000, 6000);
 eq("presetsFor scales the ladder to a different band",

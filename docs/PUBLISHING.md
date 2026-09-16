@@ -65,7 +65,7 @@ The following is the exact text to paste into the
 >
 > - **Bar widget** — live CPU temperature and fan RPM, tinted when the fan is
 >   held off the firmware curve.
-> - **Panel** — Auto / Off / Low / Medium / High / Full presets, an RPM slider,
+> - **Panel** — Auto / Floor / Low / Medium / High / Full presets, an RPM slider,
 >   live status, degraded/offline banners with exact fix commands, and an
 >   in-panel key map.
 > - **Global keyboard shortcuts** — SUPER+ALT+{T,A,O,L,M,H,X,C} for panel
@@ -82,7 +82,7 @@ The following is the exact text to paste into the
 >   documented model fails toward the firmware (per-poll verify/re-assert, async
 >   signal-safe AUTO restore on death, systemd watchdog).
 > - **Keyboard-first.** Every panel action is reachable without a pointer.
-> - **Truthful UI.** Presets are floors, not quieter-than-firmware modes. "Off"
+> - **Truthful UI.** Presets are floors, not quieter-than-firmware modes. "Floor"
 >   cannot stop the fan and says so. Degraded states are rendered from the
 >   daemon's own fields.
 >

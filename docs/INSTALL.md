@@ -152,7 +152,7 @@ resolves. The first install keeps a timestamped backup in
 |---|---|
 | `SUPER + ALT + T` | toggle the fan panel |
 | `SUPER + ALT + A` | fans auto (firmware) |
-| `SUPER + ALT + O` | fans off (hardware floor) |
+| `SUPER + ALT + O` | fans floor |
 | `SUPER + ALT + L` | fans low |
 | `SUPER + ALT + M` | fans medium |
 | `SUPER + ALT + H` | fans high |

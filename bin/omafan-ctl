@@ -482,7 +482,7 @@ preset_rpm() {
 preset_label() {
     case "$1" in
         auto) printf 'Auto (firmware)' ;;
-        off) printf 'Off (hardware floor)' ;;
+        off) printf 'Floor (hardware floor)' ;;
         low) printf 'Low' ;;
         med) printf 'Medium' ;;
         high) printf 'High' ;;

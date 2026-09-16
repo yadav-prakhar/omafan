@@ -84,18 +84,18 @@ hardware range `[fan_min_rpm, fan_max_rpm]` read from `afanctl status --json`.
 | id | label | kind | rpm |
 |---|---|---|---|
 | `auto` | Auto (firmware) | release | `null` → `afanctl observe` |
-| `off` | Off (hardware floor) | hold | `fan_min_rpm` |
+| `off` | Floor (hardware floor) | hold | `fan_min_rpm` |
 | `low` | Low | hold | `round(min + 0.25 × (max − min))` |
 | `med` | Medium | hold | `round(min + 0.50 × (max − min))` |
 | `high` | High | hold | `round(min + 0.75 × (max − min))` |
 | `full` | Full | hold | `fan_max_rpm` |
 
 On the reference machine (`MacBookPro14,1`, `fan1_min=1200`, `fan1_max=7200`)
-that is `off 1200 · low 2700 · med 4200 · high 5700 · full 7200`.
+that is `floor 1200 · low 2700 · med 4200 · high 5700 · full 7200`.
 
 Rules:
-- **`off` is not "fan off".** The SMC floor is `fan1_min` (1200 rpm); sysfs cannot
-  stop the fan. Every surface that renders `off` must say so (`Off (hardware
+- **`floor` is not "fan off".** The SMC floor is `fan1_min` (1200 rpm); sysfs cannot
+  stop the fan. Every surface that renders `floor` must say so (`Floor (hardware
   floor)` / a footnote) — never claim the fan is stopped.
 - **Presets are floors, not quieter-than-firmware modes.** The firmware idles
   near 1787 rpm on the reference machine, so `low` (2700) is *louder* than
@@ -378,8 +378,8 @@ keyboard and pointer share one highlight.
 | `l` / `→` | presets: next preset · slider: +1 step |
 | `Shift` + `h`/`l` | slider: ±500 rpm |
 | `Enter` / `Space` | presets: apply focused preset (a second press confirms an undercooling-risk preset, §5.1) · slider: apply current value now |
-| `1`…`6` | apply `auto, off, low, med, high, full` directly |
-| `c` | cycle presets forward (`auto → off → low → med → high → full → auto`) |
+| `1`…`6` | apply `auto, floor, low, med, high, full` directly |
+| `c` | cycle presets forward (`auto → floor → low → med → high → full → auto`) |
 | `r` | refresh status now |
 | `?` | toggle the key-map overlay (`KeyboardHelp.qml`) |
 | `Esc` | close the help overlay if open, else close the panel |
@@ -406,7 +406,7 @@ live compositor (REVIEW-R1 R1-4).
 |---|---|---|
 | `SUPER + ALT + T` | omafan: toggle fan panel | `omarchy-shell omafan toggle` |
 | `SUPER + ALT + A` | omafan: fans auto (firmware) | `omafan-ctl preset auto --notify` |
-| `SUPER + ALT + O` | omafan: fans off (floor) | `omafan-ctl preset off --notify` |
+| `SUPER + ALT + O` | omafan: fans floor | `omafan-ctl preset off --notify` |
 | `SUPER + ALT + L` | omafan: fans low | `omafan-ctl preset low --notify` |
 | `SUPER + ALT + M` | omafan: fans medium | `omafan-ctl preset med --notify` |
 | `SUPER + ALT + H` | omafan: fans high | `omafan-ctl preset high --notify` |

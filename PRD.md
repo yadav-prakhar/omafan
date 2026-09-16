@@ -23,7 +23,7 @@ Shipped as:
 
 1. a **bar widget** — live CPU temperature and fan rpm, tinted whenever the fan is
    held off the firmware curve;
-2. a **panel** — Auto/Off/Low/Med/High/Full presets, an rpm slider, live status,
+2. a **panel** — Auto/Floor/Low/Med/High/Full presets, an rpm slider, live status,
    banners for degraded/offline states, an in-panel key map (`?`);
 3. **global keyboard shortcuts** on chords verified free against every binding
    the machine actually has (see §6);
@@ -60,7 +60,7 @@ omafan's differentiators, each a requirement below:
 - **R3 — keyboard-first.** The panel is fully operable without a pointer, and
   the six presets plus a cycle action have machine-verified-free global chords.
 - **R4 — truthful UI.** Presets are floors, not quieter-than-firmware modes;
-  "Off" cannot stop the fan and must say so; degraded/offline states are rendered
+  "Floor" cannot stop the fan and must say so; degraded/offline states are rendered
   from the daemon's own fields, never optimistically.
 
 ## 2. Verified environment facts (re-checked live during this build)
@@ -85,7 +85,7 @@ omafan's differentiators, each a requirement below:
 
 - **F1** Bar widget shows live CPU temperature (default), or rpm, or both —
   configurable; tinted when a hold is active.
-- **F2** Panel lists `Auto · Off (hardware floor) · Low · Medium · High · Full`
+- **F2** Panel lists `Auto · Floor (hardware floor) · Low · Medium · High · Full`
   with the rpm each maps to, plus the rpm slider (`fan_min..fan_max`, step 100).
 - **F3** `Auto` releases the fan to the SMC firmware (`afanctl observe`) —
   byte-for-byte the "as if nothing was controlling the fans" behaviour the

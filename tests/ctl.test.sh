@@ -205,7 +205,7 @@ assert_eq "null,1200,2700,4200,5700,7200" "$(jget "$out" "$ladder_rpms")" \
 assert_eq "release,hold,hold,hold,hold,hold" "$(jget "$out" '[.presets[].kind] | join(",")')" \
     "auto releases, the rest hold"
 assert_eq "Auto (firmware)" "$(jget "$out" '.presets[0].label')" "auto label"
-assert_eq "Off (hardware floor)" "$(jget "$out" '.presets[1].label')" \
+assert_eq "Floor (hardware floor)" "$(jget "$out" '.presets[1].label')" \
     "off names the hardware floor, never 'fan off'"
 assert_eq "Medium" "$(jget "$out" '.presets[3].label')" "med label"
 

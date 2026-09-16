@@ -777,11 +777,11 @@ Panel {
             }
 
             // The legend (DESIGN.md 3): presets are floors, never quieter
-            // modes; Off is the hardware floor, not a stopped fan.
+            // modes; Floor is the hardware floor, not a stopped fan.
             Text {
               textFormat: Text.PlainText
               text: "Preset rpms are floors, not quieter-than-firmware modes. " +
-                    "'Off' stops at the hardware floor; only Auto returns the fan to firmware."
+                    "'Floor' stops at the hardware floor; only Auto returns the fan to firmware."
               color: Qt.darker(root.barForeground, 1.4)
               font.family: root.bar ? root.bar.fontFamily : Style.font.family
               font.pixelSize: Style.font.caption
@@ -957,7 +957,7 @@ Panel {
         // D3: the full "Off (hardware floor)" label overflows the chip's third
         // of the content width and renders truncated on screen; the short form
         // is honest because the floors footnote carries the full wording.
-        text: chip.presetId === "off" ? "Off (floor)" : (chip.presetData ? (chip.presetData.label || chip.presetId) : "—")
+        text: chip.presetId === "off" ? "Floor" : (chip.presetData ? (chip.presetData.label || chip.presetId) : "—")
         color: root.barForeground
         font.family: root.bar ? root.bar.fontFamily : Style.font.family
         font.pixelSize: Style.font.caption

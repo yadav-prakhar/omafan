@@ -20,8 +20,8 @@ operable without a pointer. The table below is also what `?` renders in-panel
 | `l` / `→` | presets: next preset · slider: +1 step |
 | `Shift` + `h` / `l` | slider: ±500 rpm |
 | `Enter` / `Space` | presets: apply focused preset (a second press confirms an undercooling-risk preset, §5.1) · slider: apply the current value now |
-| `1` … `6` | apply `auto, off, low, med, high, full` directly |
-| `c` | cycle presets forward (`auto → off → low → med → high → full → auto`; a custom hold cycles to `off`) |
+| `1` … `6` | apply `auto, floor, low, med, high, full` directly |
+| `c` | cycle presets forward (`auto → floor → low → med → high → full → auto`; a custom hold cycles to `floor`) |
 | `r` | refresh status now |
 | `?` | toggle the key-map overlay (`KeyboardHelp.qml`) |
 | `Esc` | close the help overlay if open, else close the panel |
@@ -44,7 +44,7 @@ the panel toggle goes through shell IPC (DESIGN.md §7).
 |---|---|---|
 | `SUPER + ALT + T` | omafan: toggle fan panel | `omarchy-shell omafan toggle` |
 | `SUPER + ALT + A` | omafan: fans auto (firmware) | `omafan-ctl preset auto --notify` |
-| `SUPER + ALT + O` | omafan: fans off (floor) | `omafan-ctl preset off --notify` |
+| `SUPER + ALT + O` | omafan: fans floor | `omafan-ctl preset off --notify` |
 | `SUPER + ALT + L` | omafan: fans low | `omafan-ctl preset low --notify` |
 | `SUPER + ALT + M` | omafan: fans medium | `omafan-ctl preset med --notify` |
 | `SUPER + ALT + H` | omafan: fans high | `omafan-ctl preset high --notify` |

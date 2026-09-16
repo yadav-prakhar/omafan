@@ -59,7 +59,7 @@ build_block() {
 -- Managed by bin/omafan-keybindings; edits inside this block are overwritten.
 o.bind(\"SUPER + ALT + T\", \"omafan: toggle fan panel\", \"omarchy-shell omafan toggle\")
 o.bind(\"SUPER + ALT + A\", \"omafan: fans auto (firmware)\", \"$ctl preset auto --notify\")
-o.bind(\"SUPER + ALT + O\", \"omafan: fans off (floor)\", \"$ctl preset off --notify\")
+o.bind(\"SUPER + ALT + O\", \"omafan: fans floor\", \"$ctl preset off --notify\")
 o.bind(\"SUPER + ALT + L\", \"omafan: fans low\", \"$ctl preset low --notify\")
 o.bind(\"SUPER + ALT + M\", \"omafan: fans medium\", \"$ctl preset med --notify\")
 o.bind(\"SUPER + ALT + H\", \"omafan: fans high\", \"$ctl preset high --notify\")

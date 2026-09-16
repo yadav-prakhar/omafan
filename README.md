@@ -1,5 +1,7 @@
 # omafan
 
+[![Built for Omarchy: Plugin](https://raw.githubusercontent.com/tcballard/omarchy-badges/75975e5b5bf75e7ede3764bcd2950046f7abfe2c/badges/v1/omarchy-plugin.svg)](https://github.com/tcballard/omarchy-badges) ![Supported Omarchy versions: 4.0.0+](https://raw.githubusercontent.com/tcballard/omarchy-badges/75975e5b5bf75e7ede3764bcd2950046f7abfe2c/badges/v1/compatibility/omarchy-4.0.0-plus.svg)
+
 Fan control for pre-T2 Intel Macs on Omarchy: firmware auto, five presets and
 an RPM slider on top of [afanctl](https://github.com/yadav-prakhar/afanctl),
 with live temperature and RPM in the bar.
@@ -12,7 +14,7 @@ daemon's documented command channel.
 
 - **Bar widget** — live CPU temperature and/or fan RPM, tinted whenever the fan
   is held off the firmware curve.
-- **Panel** — `Auto · Off (hardware floor) · Low · Medium · High · Full`, an RPM
+- **Panel** — `Auto · Floor (hardware floor) · Low · Medium · High · Full`, an RPM
   slider, live status, banners for degraded/offline states, and an in-panel key
   map on `?`.
 - **Keyboard-first** — the whole panel works without a pointer, and eight global
@@ -120,7 +122,7 @@ so they stay correct on other pre-T2 Macs. On the reference machine
 | Preset | Label | rpm | afanctl verb |
 |---|---|---|---|
 | `auto` | Auto (firmware) | — | `observe` |
-| `off` | Off (hardware floor) | 1200 | `hold 1200` |
+| `floor` | Floor (hardware floor) | 1200 | `hold 1200` |
 | `low` | Low | 2700 | `hold 2700` |
 | `med` | Medium | 4200 | `hold 4200` |
 | `high` | High | 5700 | `hold 5700` |
@@ -156,8 +158,8 @@ Everything the pointer can do, a key can do.
 | `h` / `←` · `l` / `→` | presets: previous / next preset · slider: −1 / +1 step |
 | `Shift` + `h` / `l` | slider: ±500 rpm |
 | `Enter` / `Space` | presets: apply the focused preset · slider: apply the current value |
-| `1` … `6` | apply `auto, off, low, med, high, full` directly |
-| `c` | cycle presets (`auto → off → low → med → high → full → auto`) |
+| `1` … `6` | apply `auto, floor, low, med, high, full` directly |
+| `c` | cycle presets (`auto → floor → low → med → high → full → auto`) |
 | `r` | refresh status now |
 | `?` | toggle the key-map overlay |
 | `Esc` | close the key map if open, else close the panel |
@@ -179,7 +181,7 @@ toggle goes through shell IPC.
 |---|---|
 | `SUPER + ALT + T` | toggle the fan panel |
 | `SUPER + ALT + A` | fans auto (firmware) — the release escape hatch |
-| `SUPER + ALT + O` | fans off (hardware floor) |
+| `SUPER + ALT + O` | fans floor (hardware floor) |
 | `SUPER + ALT + L` | fans low |
 | `SUPER + ALT + M` | fans medium |
 | `SUPER + ALT + H` | fans high |
@@ -209,9 +211,9 @@ installed `afanctl` daemon the same two commands a person would type, and
 renders whatever the daemon reports afterwards. The full model is in
 [docs/SAFETY.md](docs/SAFETY.md); the operator-facing rules are:
 
-- **"Off" is not off.** The SMC floor is `fan_min_rpm` (1200 rpm on the
+- **"Floor" is not off.** The SMC floor is `fan_min_rpm` (1200 rpm on the
   reference machine); the fan cannot be stopped through this interface. Every
-  surface says `Off (hardware floor)` and never claims the fan is stopped.
+  surface says `Floor (hardware floor)` and never claims the fan is stopped.
 - **Presets are floors, not quiet modes.** `low` is louder than firmware auto;
   `auto` is the quiet option. The panel says so in its legend.
 - **The fan is never left unowned.** Control is delegated to afanctl, whose
@@ -337,7 +339,7 @@ omafan's four differentiators, each a requirement of the build:
 3. **Keyboard-first.** The panel is fully operable without a pointer, and the
    six presets plus a cycle action have global chords proven free against the
    live binding set. None of the siblings documents global shortcuts.
-4. **Truthful UI.** Presets are floors; "Off" cannot stop the fan and says so;
+4. **Truthful UI.** Presets are floors; "Floor" cannot stop the fan and says so;
    degraded and offline states are rendered from the daemon's own fields, never
    optimistically.
 

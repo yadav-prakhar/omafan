@@ -10,7 +10,7 @@ var PRESET_ORDER = ["auto", "off", "low", "med", "high", "full"];
 
 var PRESET_LABELS = {
   auto: "Auto (firmware)",
-  off: "Off (hardware floor)",
+  off: "Floor (hardware floor)",
   low: "Low",
   med: "Medium",
   high: "High",

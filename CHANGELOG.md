@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Bar widget showing live CPU temperature, fan RPM, or both, tinted when a
   manual hold is active.
-- Panel with six presets (Auto, Off, Low, Medium, High, Full) derived from the
+- Panel with six presets (Auto, Floor, Low, Medium, High, Full) derived from the
   live hardware fan range, plus an RPM slider.
 - Keyboard-first cursor model inside the panel: j/k/h/l navigation, digits 1-6
   for direct presets, c to cycle, r to refresh, ? for a key-map overlay.

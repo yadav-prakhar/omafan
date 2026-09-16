@@ -66,11 +66,11 @@ the `AFANCTL_RUNTIME_DIR` environment variable; it never creates or edits
   attempt is refused (exit 8) and the panel requires a second `Enter`/click
   within 10 s; the warning names the temperature, the current rpm, the
   requested rpm and a safe alternative. This exists because the reference
-  machine was observed at 97 °C with the firmware at 4794 rpm, where `off`,
+  machine was observed at 97 °C with the firmware at 4794 rpm, where `floor`,
   `low` and `med` all reduce airflow (DESIGN.md §5.1).
-- **"Off" is not off.** The SMC floor is `fan_min_rpm` (1200 rpm on the
+- **"Floor" is not off.** The SMC floor is `fan_min_rpm` (1200 rpm on the
   reference machine); sysfs cannot stop the fan. Every surface renders
-  `Off (hardware floor)`, never "fan off" (DESIGN.md §3).
+  `Floor (hardware floor)`, never "fan off" (DESIGN.md §3).
 - **Presets are floors, not quiet modes.** Firmware auto idles near 1787 rpm
   on the reference machine, so `low` (2700 rpm) is *louder* than auto. `auto`
   is the only quiet option, and the panel says so in its legend.

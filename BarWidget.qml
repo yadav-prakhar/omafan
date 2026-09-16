@@ -154,6 +154,7 @@ BarWidget {
     text: root.barText
     tooltipText: root.tooltip
     active: root.holdActive
+    activeColor: "#5a995a"
     useActiveColor: true
     onPressed: function(b) {
       if (b === Qt.RightButton) {
