@@ -22,7 +22,7 @@ bin/ is the sole afanctl interface: `omafan-ctl` (daemon verbs, JSON, writes via
 - Env mirrors: `OMAFAN_AFANCTL`, `OMAFAN_RUNTIME_DIR`, `OMAFAN_PKEXEC`. Keybindings overrides: `OMAFAN_HYPR_CONFIG`, `OMAFAN_HYPRCTL`, `OMAFAN_STATE_DIR`, `OMAFAN_CTL`, `OMAFAN_DEFAULT_BINDINGS_DIR`.
 
 ## CONVENTIONS
-- `set -euo pipefail`; no eval; every expansion quoted; scratch only via `tmpfile()` which appends to `Tmpfiles` and is reaped by `trap cleanup EXIT`.
+- `set -euo pipefail`; no eval; every expansion quoted; scratch only via `tmpfile()`. Each scratch file is named for `$$` and reaped by `trap cleanup EXIT` from that name pattern — never from an array: `tmpfile()` is always called inside `$(...)`, so anything a subshell registers dies with it and the file leaks (see `tests/ctl.test.sh` "scratch reaping").
 - Every external wait is bounded: runner 20 s, probes 3 s, notify-send 5 s. A runner timeout is reported as the auth refusal, never as success.
 - `TIMEOUT_BIN` pins `/usr/bin/timeout` at startup: callers may clip PATH, and the hang guard must not be defeatable that way.
 - All JSON is built by `jq -cn --arg/--argjson`, never printf-pasted; numeric compares (`is_undercooling_hot`) go through `jq -en` so jq does exact integer math.

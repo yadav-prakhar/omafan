@@ -79,17 +79,25 @@ cached_interval="" # daemon poll interval from the hw cache (empty = unknown)
 hw_cache_file="" # path chosen by load_limits (empty = cache unusable)
 warnings_json="[]"
 
-Tmpfiles=()
+# Scratch files are named for this process and reaped by the EXIT trap from that
+# name pattern, not from a list. The list was the leak: tmpfile() is only ever
+# called as `x="$(tmpfile)"`, and a command substitution runs in a subshell, so
+# `Tmpfiles+=(...)` updated a copy of the array that died with the subshell —
+# the file was never reaped. Every `status --full` (the bar/panel's live read)
+# and every `doctor` left one file behind; ~1200 had piled up in /tmp. `$$` is
+# the same inside a subshell as in the shell that runs the trap, so the pattern
+# is a complete record with none of the bookkeeping to forget.
 cleanup() {
-    [ "${#Tmpfiles[@]}" -eq 0 ] || rm -f -- "${Tmpfiles[@]}"
+    local f
+    for f in "${TMPDIR:-/tmp}"/omafan-ctl."$$".*; do
+        [ -e "$f" ] || continue # no match: the literal pattern, not a file
+        rm -f -- "$f"
+    done
 }
 trap cleanup EXIT
 
 tmpfile() {
-    local f
-    f="$(mktemp "${TMPDIR:-/tmp}/omafan-ctl.XXXXXX")"
-    Tmpfiles+=("$f")
-    printf '%s\n' "$f"
+    mktemp "${TMPDIR:-/tmp}/omafan-ctl.$$.XXXXXX"
 }
 
 usage() {

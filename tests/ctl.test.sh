@@ -736,4 +736,20 @@ assert_eq "0" "$(test -e "$RUN/argv.log" && echo 1 || echo 0)" "cycle --dry-run 
 setup_case "$FIX/state-monitor-only.json"
 assert_exit_code 6 run_mode monitor-only cycle
 
+# ---------------------------------------------------------------------------
+# Scratch reaping. tmpfile() is only ever called inside a command substitution,
+# so a registry built in the subshell that calls it cannot be trusted: the verbs
+# that take the live path (`status --full` — the bar/panel's read — and
+# `doctor`) each left one 0-byte file in TMPDIR per run, and ~1200 had piled up
+# in /tmp on the operator's desktop. Reaping is by process-scoped name pattern
+# now, so every verb must leave TMPDIR exactly as it found it.
+# ---------------------------------------------------------------------------
+setup_case "$FIX/state-hold.json"
+SCRATCH_TMP="$(new_tmpdir)"
+TMPDIR="$SCRATCH_TMP" ctl status --full >/dev/null 2>&1
+TMPDIR="$SCRATCH_TMP" ctl doctor >/dev/null 2>&1
+TMPDIR="$SCRATCH_TMP" ctl status >/dev/null 2>&1
+assert_eq "0" "$(find "$SCRATCH_TMP" -mindepth 1 | wc -l)" \
+    "status --full / doctor leave no scratch files behind in TMPDIR"
+
 summarize

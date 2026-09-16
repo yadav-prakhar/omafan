@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `omafan-ctl` no longer litters `TMPDIR`. Scratch files are reaped by a
+  process-scoped name pattern instead of by an array: `tmpfile()` is always
+  called as `x="$(tmpfile)"`, and a command substitution runs in a subshell, so
+  the old `Tmpfiles+=(...)` registration happened in a copy that died with the
+  subshell and the file was never removed. `status --full` (the bar and panel's
+  live read) and `doctor` each left one 0-byte file per run — 1210 had piled up
+  in `/tmp` on the reference machine, three a minute while the bar polled.
+  `tests/ctl.test.sh` now asserts every verb leaves `TMPDIR` empty (RED against
+  the old code, which left three files behind).
 - The bar widget's hold tint follows the theme again — Omarchy's `bar.urgent` /
   `Color.urgent` "active" colour (red on the reference theme) instead of a
   hard-coded green `#5a995a`. The tint appears only while a hold is active.
