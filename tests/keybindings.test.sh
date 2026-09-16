@@ -286,7 +286,7 @@ sandbox '[]'
 out="$("$KB" print)"
 assert_eq "$CHORDS_EXPECTED" "$(printf '%s\n' "$out" | grep '^o\.bind(' | sed 's/o\.bind("\([^"]*\)".*/\1/' | tr '\n' '|')" \
     "print emits the section 7 chord table (chords)"
-assert_eq "omafan: toggle fan panel|omafan: fans auto (firmware)|omafan: fans off (floor)|omafan: fans low|omafan: fans medium|omafan: fans high|omafan: fans full|omafan: cycle fan presets|" \
+assert_eq "omafan: toggle fan panel|omafan: fans auto (firmware)|omafan: fans floor|omafan: fans low|omafan: fans medium|omafan: fans high|omafan: fans full|omafan: cycle fan presets|" \
     "$(printf '%s\n' "$out" | grep '^o\.bind(' | sed 's/o\.bind("[^"]*", "\([^"]*\)".*/\1/' | tr '\n' '|')" \
     "print emits the section 7 chord table (descriptions)"
 assert_exit_code 0 test ! -f "$OMAFAN_HYPR_CONFIG"
