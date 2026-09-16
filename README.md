@@ -1,14 +1,16 @@
 <div align="center">
 
+<img alt="the omafan panel: fan rpm and CPU temperature, six presets, an RPM slider" src="docs/images/1280x640.png" />
+
 # omafan
 
 [![Built for Omarchy: Plugin](https://raw.githubusercontent.com/tcballard/omarchy-badges/75975e5b5bf75e7ede3764bcd2950046f7abfe2c/badges/v1/omarchy-plugin.svg)](https://github.com/tcballard/omarchy-badges) [![Supported Omarchy versions: 4.0.0+](https://raw.githubusercontent.com/tcballard/omarchy-badges/dd84bb21f19caf617caa5b3c1af7ff3c6cb847c3/badges/v1/compatibility/omarchy-4.0.0-plus.svg)](https://github.com/tcballard/omarchy-badges) [![License: GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-blue.svg)](LICENSE)
 
-<img width="620" alt="the omafan panel: fan rpm and CPU temperature, six presets, an RPM slider" src="preview.png" />
-
-*Captured on the reference machine (MacBookPro14,1 "A1708"), fan in firmware auto.*
+<!-- *Captured on the reference machine (MacBookPro14,1 "A1708"), fan in firmware auto.* -->
 
 </div>
+
+<br>
 
 Fan control for pre-T2 Intel Macs on Omarchy: firmware auto, five presets and
 an RPM slider on top of [afanctl](https://github.com/yadav-prakhar/afanctl),
@@ -118,6 +120,8 @@ preset chips sit above an RPM slider; banner rows appear only when something is
 wrong, always with the exact fix command. The panel polls the daemon every
 `poll_seconds` (default 2) and re-reads status after every write, so it shows
 what the daemon reports, never what it asked for.
+
+<img width="560" alt="the omafan panel: fan rpm and CPU temperature, six presets, an RPM slider" src="preview.png" />
 
 ### Presets
 
