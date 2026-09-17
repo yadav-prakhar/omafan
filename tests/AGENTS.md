@@ -1,7 +1,7 @@
 # tests/
 
 ## OVERVIEW
-Hardware-free gate: 6 hermetic suites driven by run-all.sh, plus 2 guarded live suites that never run by default.
+Hardware-free gate: 8 hermetic suites driven by run-all.sh, plus 2 guarded live suites that never run by default.
 
 ## STRUCTURE
 
@@ -14,8 +14,10 @@ Hardware-free gate: 6 hermetic suites driven by run-all.sh, plus 2 guarded live 
 | ctl | ctl.test.sh | `bash tests/ctl.test.sh` | fixtures/fake-afanctl, jq |
 | keybindings | keybindings.test.sh | `bash tests/keybindings.test.sh` | stub hyprctl, sandboxed HOME |
 | qml-lint | qml-lint.sh | `bash tests/qml-lint.sh` | qmllint + `$OMARCHY_PATH/shell`; prints SKIP and exits 0 when either is absent |
+| panel-slider | panel-slider.test.sh | `bash tests/panel-slider.test.sh` | none; structural Panel.qml assertions for the T2 Auto-reset guards |
+| panel-refresh | panel-refresh.test.sh | `bash tests/panel-refresh.test.sh` | none; structural Panel.qml assertions for the T5 in-panel refresh row |
 
-`tests/run-all.sh --list` prints the 6 gate names. A missing suite file is a SKIP, never a FAIL.
+`tests/run-all.sh --list` prints the 8 gate names. A missing suite file is a SKIP, never a FAIL.
 
 ### Live suites (never in run-all.sh; both print SKIP and exit 0 without the guard)
 - `OMAFAN_LIVE=1 tests/integration-shell.sh`: live omarchy-shell IPC. Only write is the intentional `preset bogus` error path.

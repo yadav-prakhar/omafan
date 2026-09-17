@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The RPM slider no longer keeps showing the last manual rpm after the fan is
+  returned to firmware auto. `pendingRpm` is cleared only when a fresh daemon
+  status confirms the hold is gone (never on a bare write exit), the slider
+  falls back to its base/min rendering (`—` at the hardware floor), a queued
+  slider debounce is cancelled on every release path so it cannot reapply a
+  manual hold afterwards, and a stale hold document arriving after an Auto
+  write can no longer repopulate the slider. A failed release keeps the
+  truthful prior state. Guarded by `tests/panel-slider.test.sh` in the gate.
+  Bug fix only — no contract change (ruling R9; `Model.js` signatures,
+  presets, exit codes and the keyboard map are untouched).
+
 - `omafan-ctl` no longer litters `TMPDIR`. Scratch files are reaped by a
   process-scoped name pattern instead of by an array: `tmpfile()` is always
   called as `x="$(tmpfile)"`, and a command substitution runs in a subshell, so
@@ -28,6 +39,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
++- In-panel refresh control: the panel's new REFRESH row (below the slider)
++  sets the Advanced polling control from the UI — Auto/Custom chips write
++  `poll_mode` and, in custom mode, a `−`/`+` stepper moves `poll_seconds` by
++  one whole second within 1–10 (clamped through `Model.effectivePollSeconds`).
++  Writes go through the shell's own `omarchy bar set` path (no new
++  privilege, no direct `shell.json` editing), take effect live without a
++  reload, are allowed while the daemon is degraded/offline, and never touch
++  the fan-write lock or the keyboard cursor model (ruling R10; guarded by
++  `tests/panel-refresh.test.sh`, the gate's 8th suite).
+- Advanced polling control: a `poll_mode` setting (`auto`|`custom`, default
+  `auto`) on top of the existing `poll_seconds` key (ruling R9, live-verified).
+  `auto` re-reads the daemon every 2 s regardless of any leftover
+  `poll_seconds` value; `custom` uses `poll_seconds` in whole seconds 1–10.
+  The control governs how often omafan re-reads status, never how often the
+  daemon samples the SMC.
 - `CONTRIBUTING.md` — the gate, branch naming, commit conventions, the
   frozen-contract procedure and the code conventions per language.
 - `SECURITY.md` — what security means for a fan controller (privilege boundary,

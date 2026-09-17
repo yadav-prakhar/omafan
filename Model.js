@@ -275,6 +275,29 @@ function isStateStale(ageSeconds) {
   return v > STALE_AFTER_S;
 }
 
+// Advanced polling control (plan 2026-09-17 T3): how often omafan re-reads the
+// daemon's status — never how often the daemon samples the SMC (afanctl's own
+// [poll] interval_s is out of scope). Mode "auto" is exactly 2 s; mode
+// "custom" uses poll_seconds in whole seconds 1-10.
+var AUTO_POLL_SECONDS = 2;
+var MIN_POLL_SECONDS = 1;
+var MAX_POLL_SECONDS = 10;
+
+// Mode math for Panel.qml pollSeconds. Anything but "custom" (auto, missing,
+// unknown) is exactly AUTO_POLL_SECONDS, so an existing shell.json with a
+// leftover nondefault poll_seconds keeps today's behaviour without touching
+// anything. A custom value must be whole seconds: fractional or non-numeric
+// input is ignored (falls back to AUTO_POLL_SECONDS); whole seconds outside
+// 1-10 are clamped, never fatal.
+function effectivePollSeconds(mode, pollSeconds) {
+  if (mode !== "custom") return AUTO_POLL_SECONDS;
+  var n = finite(pollSeconds);
+  if (!isFinite(n) || Math.floor(n) !== n) return AUTO_POLL_SECONDS;
+  if (n < MIN_POLL_SECONDS) return MIN_POLL_SECONDS;
+  if (n > MAX_POLL_SECONDS) return MAX_POLL_SECONDS;
+  return n;
+}
+
 // DESIGN.md §5.1: on a hot machine a preset can command less airflow than the
 // firmware already delivers, so the first attempt must be confirmed. An
 // unreadable temperature, rpm or target is treated as "not hot", never as

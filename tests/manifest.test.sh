@@ -61,9 +61,10 @@ else
 fi
 
 # --- settings schema the panel reads -----------------------------------------
-eq "schema keys" "$(j '.barWidget.schema | map(.key) | join(",")')" "show,poll_seconds,release_after_minutes"
+eq "schema keys" "$(j '.barWidget.schema | map(.key) | join(",")')" "show,poll_mode,poll_seconds,release_after_minutes"
 eq "defaults" "$(j '.barWidget.defaults | to_entries | map("\(.key)=\(.value)") | join(",")')" \
-    "show=temp,poll_seconds=2,release_after_minutes=0"
+    "show=temp,poll_mode=auto,poll_seconds=2,release_after_minutes=0"
+eq "poll_mode options" "$(j '.barWidget.schema[] | select(.key=="poll_mode") | "\(.type):\(.options | join("+")):\(.default)"')" "enum:auto+custom:auto"
 eq "poll_seconds bounds" "$(j '.barWidget.schema[] | select(.key=="poll_seconds") | "\(.min)-\(.max)"')" "1-10"
 
 # --- repository hygiene the shell enforces or benefits from -------------------

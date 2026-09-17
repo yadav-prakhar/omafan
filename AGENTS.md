@@ -62,6 +62,23 @@ No LSP/codegraph coverage for QML+bash (centrality unmeasured; from reads).
 | `install/remove/status` | bash verb | `bin/omafan-keybindings` | 8 chords `SUPER+ALT+{T,A,O,L,M,H,X,C}` |
 | `fake-afanctl` | fixture | `tests/fixtures/` | hardware-free daemon stand-in |
 
+## WORK RECORDS (MANDATORY)
+- Record all work for this repository in the Obsidian folder
+  `/home/prakhar/Documents/Default/Workspace/omarchy plugin development/omafan`.
+- Organize notes by purpose: `plans/` for phased plans and tickets, `logs/` for
+  implementation decisions and command evidence, `reviews/` for findings and
+  verification, and `done/` for completion summaries linked to the related notes.
+- Use dated, descriptive filenames and relative links between related notes.
+  Keep records current as work progresses; distinguish planned, completed,
+  blocked, and unverified work. Never claim a check passed without evidence.
+- Add other subfolders only when useful and explain their purpose in the notes.
+  Preserve existing notes; do not reorganize or overwrite unrelated material.
+- Obsidian records supplement, not replace, repository documentation, tests,
+  CHANGELOG.md, and required DEVIATIONS.md rulings.
+- The Advanced polling control work is scoped to omafan status refresh only.
+  afanctl hardware polling control is future work; do not conflate the two.
+  If future work changes afanctl, also document it in its Obsidian project folder.
+
 ## CONVENTIONS
 - Fan command never originates in QML: QML → `omafan-ctl` → `pkexec afanctl`.
   Panel renders what daemon reports, never what was asked.
@@ -111,7 +128,7 @@ No LSP/codegraph coverage for QML+bash (centrality unmeasured; from reads).
 
 ## COMMANDS
 ```bash
-tests/run-all.sh                          # full hardware-free gate (6 suites)
+tests/run-all.sh                          # full hardware-free gate (8 suites)
 bash tests/qml-lint.sh                    # QML lint (qmllint + qs.* shim)
 bash -n bin/omafan-ctl bin/omafan-keybindings  # shell syntax
 omarchy plugin validate .                 # shell's structural gate

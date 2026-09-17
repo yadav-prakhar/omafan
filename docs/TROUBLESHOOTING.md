@@ -43,7 +43,7 @@ writes to the fan.
 | `omarchy plugin add` fails | no network / `git` missing / already installed | see §3 |
 | Plugin listed, no bar widget | not enabled, or no placement | `omarchy plugin enable io.github.yadav-prakhar.omafan --section right` |
 | Bar shows the fan glyph, no temperature | daemon stopped or state stale | `systemctl restart afanctl` |
-| Bar temperature frozen | poll too slow or daemon wedged | lower `poll_seconds`; restart afanctl |
+| Bar temperature frozen | poll too slow or daemon wedged | check `poll_mode`/`poll_seconds` (auto = 2 s); restart afanctl |
 | `omarchy-shell omafan toggle` does nothing | plugin not active, or IPC target down | `omarchy-shell shell rescanPlugins`; `omarchy restart shell` |
 | Banner: afanctl is missing | dependency not installed | install afanctl from its `packaging/` |
 | Banner: daemon is not running / state stale | daemon stopped or wedged | `systemctl restart afanctl` |
@@ -110,9 +110,16 @@ document had no temperature or rpm:
   sensor this poll; it returns the fan to AUTO after three such polls. Watch
   `recent_errors` in the document.
 
-A frozen temperature with `state_stale: false` usually means `poll_seconds` is
-set high; lower it with
+A frozen temperature with `state_stale: false` usually means the re-read
+cadence is set slow: with `poll_mode` `auto` omafan re-reads every 2 s, with
+`custom` it uses your `poll_seconds` (whole seconds 1–10). Check both keys,
+then lower the interval — easiest from the panel itself: open the panel and
+use the REFRESH row (Custom, then the − stepper), e.g. the equivalent of
+`omarchy bar set io.github.yadav-prakhar.omafan poll_mode custom`
+followed by
 `omarchy bar set io.github.yadav-prakhar.omafan poll_seconds 2`.
+This governs how often omafan re-reads status, never how often the daemon
+samples the SMC — a wedged daemon still needs `systemctl restart afanctl`.
 
 ## 5. The panel does not open
 

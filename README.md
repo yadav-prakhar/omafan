@@ -117,9 +117,13 @@ setting is visible at a glance. It shows one of `icon`, `temp` (default),
 
 Open it by clicking the widget or running `omarchy-shell omafan toggle`. Six
 preset chips sit above an RPM slider; banner rows appear only when something is
-wrong, always with the exact fix command. The panel polls the daemon every
-`poll_seconds` (default 2) and re-reads status after every write, so it shows
-what the daemon reports, never what it asked for.
+wrong, always with the exact fix command. The panel re-reads the daemon's
+status on an Advanced polling control (`poll_mode`: `auto` = 2 s,
+`custom` = your `poll_seconds`, whole seconds 1–10) — settable right in the
+panel's REFRESH row or via the settings below — and re-reads status after
+every write, so it shows
+what the daemon reports, never what it asked for. The Advanced control governs
+how often omafan re-reads status, never how often the daemon samples the SMC.
 
 <img width="560" alt="the omafan panel: fan rpm and CPU temperature, six presets, an RPM slider" src="preview.png" />
 
@@ -148,12 +152,19 @@ steps (500 rpm with `Shift`).
 
 Three per-widget settings, editable from the shell's bar layout
 (`omarchy bar set io.github.yadav-prakhar.omafan show temp+rpm`, or the same
-keys in `shell.json`):
+keys in `shell.json`). The refresh cadence lives behind an Advanced toggle:
+`auto` re-reads the daemon every 2 s (the default, and what you get without
+touching anything); `custom` uses your `poll_seconds` instead. Both are also
+settable from the panel itself — the REFRESH row's Auto/Custom chips and ±
+stepper write these same keys. Either way this
+governs how often omafan re-reads status, never how often the daemon samples
+the SMC hardware:
 
 | Key | Values | Default | Meaning |
 |---|---|---|---|
 | `show` | `icon`, `temp`, `rpm`, `temp+rpm` | `temp` | what the bar label renders |
-| `poll_seconds` | `1`–`10` | `2` | status refresh interval |
+| `poll_mode` | `auto`, `custom` | `auto` (= 2 s) | Advanced toggle: fixed 2 s cadence, or your custom seconds |
+| `poll_seconds` | `1`–`10` | `2` | custom status refresh interval in whole seconds (used only when `poll_mode` is `custom`) |
 | `release_after_minutes` | `0`–`240` | `0` (never) | return the fan to firmware auto after N idle minutes |
 
 ## Keyboard

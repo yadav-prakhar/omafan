@@ -34,6 +34,16 @@ Panel {
   property string lastError: ""
   property bool busy: false
   property var pendingRpm: null
+  // T2: true after a release-type write (preset auto / release verb) is SENT
+  // until a fresh status confirms hold inactive; while true, a stale hold doc
+  // must never repopulate pendingRpm. Cleared only by that confirmation, by a
+  // failed release, or by a superseding manual write — never by a bare write
+  // exit 0 (an exit code is not a daemon state).
+  property bool expectingAuto: false
+  // T2: true while the in-flight write (if any) is a release; lets onExited
+  // and the command deadline void the Auto expectation on failure without
+  // touching the truthful prior pendingRpm.
+  property bool lastWriteWasRelease: false
   // T09c D3: true when a status poll failed or was killed at its deadline —
   // the previous document stays rendered but is visibly marked as stale.
   property string focusSection: "presets"   // "presets" | "slider" (DESIGN.md 6.2)
@@ -49,6 +59,15 @@ Panel {
   property int selectedIndex: 0             // slider uses the -1 sentinel
   property bool cursorActive: false
   property bool helpOpen: false
+  // Panel refresh control (T5): error line for the settings-write path. Kept
+  // separate from lastError (the fan banner) because a failed settings write
+  // is fan-neutral and must survive the next good status poll clearing
+  // lastError.
+  property string settingsError: ""
+  // True while an `omarchy bar set` write is in flight. Deliberately NOT
+  // root.busy: settings writes never touch the fan, so they stay available
+  // while a fan write or a degraded daemon holds the fan lock.
+  property bool settingsBusy: false
 
   // D4: full documents (--with the per-sensor list) are requested on panel open
   // and every tenth poll; the flag survives a refresh refused while busy so no
@@ -87,8 +106,13 @@ Panel {
     return root.withGlobalFlags(args)
   }
 
-  // From inline shell.json (base Panel.setting()). Defaults mirror manifest.json.
-  readonly property int pollSeconds: Math.min(10, Math.max(1, Math.round(Number(root.setting("poll_seconds", 2)) || 2)))
+  // Advanced polling control (T3): how often omafan re-reads daemon status,
+  // never how often the daemon samples the SMC. Mode auto (the default) is
+  // exactly 2 s regardless of any leftover poll_seconds; mode custom uses
+  // poll_seconds in whole seconds 1-10. The mode math lives in
+  // Model.effectivePollSeconds so it is covered by tests/model.test.mjs.
+  readonly property string pollMode: String(root.setting("poll_mode", "auto"))
+  readonly property int pollSeconds: Model.effectivePollSeconds(root.pollMode, root.setting("poll_seconds", 2))
   readonly property int releaseAfterMinutes: Math.max(0, Math.round(Number(root.setting("release_after_minutes", 0)) || 0))
 
   // ------------------------------------------------------- derived from doc
@@ -272,6 +296,21 @@ Panel {
     root.lastError = ""
     root.busy = true
     cmdProc.timedOut = false
+    // T2: every release path (preset auto, IPC release(), the release timer)
+    // funnels through here, so the funnel owns the Auto expectation. A queued
+    // manual write must not land after the release that superseded it, hence
+    // the debounce cancel; a newer manual write supersedes a pending Auto
+    // expectation. Refusals above return before this point, so a refused write
+    // never mutates the expectation.
+    var isRelease = args[0] === "release"
+      || (args[0] === "preset" && args.length > 1 && args[1] === "auto")
+    root.lastWriteWasRelease = isRelease
+    if (isRelease) {
+      sliderSend.stop()
+      root.expectingAuto = true
+    } else {
+      root.expectingAuto = false
+    }
     cmdProc.command = root.withGlobalFlags([root.ctlPath].concat(args))
     cmdProc.running = true
     commandDeadline.restart()
@@ -340,6 +379,45 @@ Panel {
     root.applyPreset(next)
   }
 
+  // ------------------------------------------------------- panel refresh row
+  // T5: the in-panel Auto/Custom chips and the ±1 s stepper write poll_mode /
+  // poll_seconds through the shell's own `omarchy bar set` — the same write
+  // path the bar-settings UI uses, so no new privilege and no direct
+  // shell.json editing. A settings-only write is patched into the running
+  // widgets in place (Bar.applySettingsDelta) and BarWidget re-injects the
+  // settings into this panel, so pollSeconds re-evaluates live without a
+  // reload. These writes are fan-neutral: allowed even while the daemon is
+  // degraded/offline, which is exactly when a slower or faster re-read
+  // cadence is most useful.
+  function setPollMode(mode) {
+    var next = mode === "custom" ? "custom" : "auto"
+    if (root.settingsBusy || next === root.pollMode) return
+    root.settingsBusy = true
+    root.settingsError = ""
+    settingsProc.timedOut = false
+    settingsProc.cmdErr = ""
+    settingsProc.command = [settingsProc.omarchyBin, "bar", "set",
+                            root.moduleName, "poll_mode", next]
+    settingsProc.running = true
+    settingsDeadline.restart()
+  }
+
+  function stepPollSeconds(delta) {
+    if (root.settingsBusy) return
+    // Clamp through the same mode math the cadence itself uses, so the
+    // stepper can never land outside whole seconds 1-10.
+    var next = Model.effectivePollSeconds("custom", root.pollSeconds + delta)
+    if (next === root.pollSeconds) return
+    root.settingsBusy = true
+    root.settingsError = ""
+    settingsProc.timedOut = false
+    settingsProc.cmdErr = ""
+    settingsProc.command = [settingsProc.omarchyBin, "bar", "set",
+                            root.moduleName, "poll_seconds", String(next), "--json"]
+    settingsProc.running = true
+    settingsDeadline.restart()
+  }
+
   function refresh() {
     if (statusProc.running || root.busy) return
     if (cmdProc.running) return
@@ -360,11 +438,24 @@ Panel {
       root.status = parsed.status
       root.statusStale = false
       root.lastError = ""
-      // Track the daemon's own target while a hold is on — the footer renders
-      // that truth, so the knob must not lag behind it. Never while the user
-      // is mid-drag or a debounced write is about to land.
-      if (!sliderSend.running && !rpmSlider.dragging && root.holdActive && root.holdDoc
+      // T2: a release is confirmed only by a fresh status reporting hold
+      // inactive (hold.active derives from daemon mode == "hold", DESIGN
+      // §4.1) — never by a bare write exit 0. On confirmation the queued
+      // debounce is cancelled and pendingRpm is nulled, so the slider falls
+      // back to its base/min rendering (null renders "—" at fan_min_rpm, the
+      // hardware floor — never the last manual rpm, never a stopped fan).
+      if (root.expectingAuto && !root.holdActive) {
+        root.expectingAuto = false
+        sliderSend.stop()
+        root.pendingRpm = null
+      } else if (!root.expectingAuto && !sliderSend.running && !rpmSlider.dragging
+          && root.holdActive && root.holdDoc
           && root.holdDoc.rpm !== null && root.holdDoc.rpm !== undefined) {
+        // Track the daemon's own target while a hold is on — the footer renders
+        // that truth, so the knob must not lag behind it. Never while the user
+        // is mid-drag, a debounced write is about to land, or a release is
+        // awaiting its confirming status (a stale hold doc must not resurrect
+        // a manual target after Auto).
         root.pendingRpm = root.holdDoc.rpm
       }
       // release_after_minutes: arm on the hold's RISING EDGE only. Arming on
@@ -444,10 +535,56 @@ Panel {
     }
   }
 
+  // ------------------------------------------------------------- processes
+  // T5: the settings-write Process (panel refresh row). Runs `omarchy bar
+  // set` — a plain session command, no pkexec — through the same IPC-backed
+  // write path the bar-settings UI uses. Success reports only through the
+  // shell pushing the new settings into the widgets (pollSeconds re-evaluates
+  // live); failure surfaces in the refresh row's own error line.
+  Process {
+    id: settingsProc
+    // The shell Process inherits the compositor session's PATH, where
+    // `omarchy` always lives; no pinning needed and none invented.
+    property string omarchyBin: "omarchy"
+    property string cmdErr: ""
+    property bool timedOut: false
+
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: settingsProc.cmdErr = String(text || "")
+    }
+
+    onExited: function(code) {
+      root.settingsBusy = false
+      if (code !== 0 && !settingsProc.timedOut) {
+        var fix = settingsProc.cmdErr.trim().split("\n")[0]
+        root.settingsError = "Could not save the refresh setting." +
+          (fix !== "" ? " " + fix : "") +
+          " Fix: set poll_mode / poll_seconds in the bar layout editor instead"
+      } else if (code === 0) {
+        root.settingsError = ""
+      }
+    }
+  }
+
+  Timer {
+    id: settingsDeadline
+    interval: root.commandDeadlineMs
+    // Same never-frozen guarantee as the fan-write deadline: a hanging
+    // settings write releases the lock and names the symptom.
+    onTriggered: {
+      if (!settingsProc.running) return
+      settingsProc.timedOut = true
+      settingsProc.running = false // kills the process
+      root.settingsBusy = false
+      root.settingsError = "omarchy bar set did not answer within 20 s — the refresh setting was not saved; try again"
+    }
+  }
+
   // --------------------------------------------------------------- processes
   // T09c D1: (20 s) — the panel must never be frozen by a runner that never
-  // answers (e.g. an unanswered polkit password prompt). Both deadlines are
-  // started whenever their process is started.
+  // answers (e.g. an unanswered polkit password prompt). All three deadlines
+  // are started whenever their process is started.
   readonly property int commandDeadlineMs: 20000
   readonly property string commandTimeoutMessage: "omafan-ctl did not answer within 20 s — a polkit password prompt may be waiting (run `omafan-ctl doctor`); the fan's last verified state is shown below"
   readonly property string statusTimeoutMessage: "omafan-ctl status did not answer within 20 s — the panel is showing the last state it received. Fix: run `omafan-ctl doctor`, then `systemctl restart afanctl`"
@@ -490,7 +627,12 @@ Panel {
         var fix = cmdProc.cmdErr.trim().split("\n")[0]
         root.lastError = "omafan-ctl failed." + (fix !== "" ? " " + fix : "") +
           " Fix: run bin/omafan-ctl doctor"
+        // T2: a failed release voids the Auto expectation but keeps the
+        // truthful prior pendingRpm. Success clears nothing here — only a
+        // fresh status reporting hold inactive confirms Auto (applyStatus).
+        if (root.lastWriteWasRelease) root.expectingAuto = false
       }
+      root.lastWriteWasRelease = false
       Qt.callLater(root.refresh)
     }
   }
@@ -507,6 +649,11 @@ Panel {
       cmdProc.running = false // kills the process
       root.busy = false
       root.pendingRpm = null
+      // T2: a killed release never confirmed Auto; void the expectation so the
+      // next fresh hold status can resync the truthful target (the null above
+      // already renders base/min until then).
+      if (root.lastWriteWasRelease) root.expectingAuto = false
+      root.lastWriteWasRelease = false
       root.lastError = root.commandTimeoutMessage
     }
   }
@@ -864,6 +1011,114 @@ Panel {
             }
           }
 
+          // ---------- refresh ----------
+          // Mouse-only control (T5): it sits OUTSIDE the keyboard cursor
+          // sections, whose two-section contract DESIGN.md 6.2 freezes. The
+          // chips and stepper write through setPollMode/stepPollSeconds.
+          PanelSeparator { foreground: root.barForeground }
+
+          Column {
+            width: parent.width
+            spacing: Style.space(6)
+
+            Item {
+              width: parent.width
+              implicitHeight: Math.max(refreshHeader.implicitHeight, refreshValue.implicitHeight)
+
+              PanelSectionHeader {
+                id: refreshHeader
+                text: "REFRESH"
+                foreground: root.barForeground
+                fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+              }
+
+              Text {
+                id: refreshValue
+                textFormat: Text.PlainText
+                // The effective cadence: mode auto is exactly 2 s regardless
+                // of any stored poll_seconds (Model.effectivePollSeconds).
+                text: root.pollSeconds + " s · " + (root.pollMode === "custom" ? "custom" : "auto")
+                color: Qt.darker(root.barForeground, 1.4)
+                font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                font.pixelSize: Style.font.caption
+                font.bold: true
+                anchors.right: parent.right
+                anchors.rightMargin: Style.space(6)
+                anchors.verticalCenter: parent.verticalCenter
+              }
+            }
+
+            Row {
+              spacing: Style.spacing.xs
+
+              RefreshChip {
+                label: "Auto"
+                isActive: root.pollMode !== "custom"
+                enabled: !root.settingsBusy
+                onActivated: root.setPollMode("auto")
+              }
+
+              RefreshChip {
+                label: "Custom"
+                isActive: root.pollMode === "custom"
+                enabled: !root.settingsBusy
+                onActivated: root.setPollMode("custom")
+              }
+
+              // Stepper, meaningful only in custom mode: auto is pinned to 2 s.
+              Row {
+                visible: root.pollMode === "custom"
+                spacing: Style.spacing.xs
+
+                RefreshChip {
+                  label: "−"
+                  enabled: !root.settingsBusy
+                  onActivated: root.stepPollSeconds(-1)
+                }
+
+                Text {
+                  textFormat: Text.PlainText
+                  text: root.pollSeconds + " s"
+                  color: root.barForeground
+                  font.family: root.bar ? root.bar.fontFamily : Style.font.family
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                  anchors.verticalCenter: parent.verticalCenter
+                }
+
+                RefreshChip {
+                  label: "+"
+                  enabled: !root.settingsBusy
+                  onActivated: root.stepPollSeconds(1)
+                }
+              }
+            }
+
+            Text {
+              visible: root.settingsError !== ""
+              textFormat: Text.PlainText
+              text: root.settingsError
+              color: Color.urgent
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+              width: parent.width
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              text: "How often omafan re-reads the daemon's status — the daemon still samples the sensors itself."
+              color: Qt.darker(root.barForeground, 1.4)
+              font.family: root.bar ? root.bar.fontFamily : Style.font.family
+              font.pixelSize: Style.font.caption
+              opacity: 0.8
+              wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+              width: parent.width
+            }
+          }
+
           // ---------- footer ----------
           PanelSeparator { foreground: root.barForeground }
 
@@ -929,6 +1184,40 @@ Panel {
   }
 
   // ---------------------------------------------------------- sub-components
+  // T5: a mode/stepper chip for the mouse-only refresh row. Same visual
+  // language as PresetChip (CursorSurface-style fills) but plain Rectangle +
+  // MouseArea because it is not part of the keyboard cursor model.
+  component RefreshChip: Rectangle {
+    id: refreshChipRoot
+    required property string label
+    property bool isActive: false
+    signal activated()
+
+    width: refreshChipLabel.implicitWidth + Style.space(18)
+    height: refreshChipLabel.implicitHeight + Style.space(8)
+    radius: 6
+    color: refreshChipRoot.isActive
+      ? Style.selectedFillFor(root.barForeground, Color.accent)
+      : Style.hoverFillFor(root.barForeground, Color.accent)
+
+    Text {
+      id: refreshChipLabel
+      anchors.centerIn: parent
+      textFormat: Text.PlainText
+      text: refreshChipRoot.label
+      color: root.barForeground
+      font.family: root.bar ? root.bar.fontFamily : Style.font.family
+      font.pixelSize: Style.font.caption
+      font.bold: true
+    }
+
+    MouseArea {
+      anchors.fill: parent
+      cursorShape: Qt.PointingHandCursor
+      onClicked: refreshChipRoot.activated()
+    }
+  }
+
   component PresetChip: CursorSurface {
     id: chip
     required property var presetData

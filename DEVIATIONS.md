@@ -64,6 +64,90 @@ because these two files were owned by completed tickets:
   overrides, and a fresh state writes normally. Not yet covered by a regression
   case in `tests/ctl.test.sh` (open item, listed in `docs/BUILD-LOG.md`).
 
+- **R10 — In-panel refresh control (T5, 2026-09-17).** Old behaviour
+  (`DESIGN.md §6.2`, `Panel.qml`): `poll_mode`/`poll_seconds` could only be
+  changed outside the panel — the shell's bar-settings UI,
+  `omarchy bar set`, or a hand-edited `shell.json` — and the panel content was
+  exactly hero, banners, presets, slider, footer. New behaviour: the panel
+  gains a mouse-only REFRESH row — `Auto`/`Custom` chips writing `poll_mode`
+  and, in custom mode, a `−`/`+` stepper writing `poll_seconds` (`--json`, so
+  the integer stays typed) in whole seconds 1–10 clamped through
+  `Model.effectivePollSeconds`. The write goes through the shell's own
+  `omarchy bar set` IPC path (source-read: `PluginRegistry.setBarWidget`
+  mutates the config and `Bar.applySettingsDelta` patches the running widgets
+  in place, no reload; `BarWidget.onSettingsChanged` re-injects settings into
+  the panel, so `pollSeconds` re-evaluates live). Why: user ask ("i want the
+  poll interval control in a way that it can be set from panel in the ui") —
+  the T3 control existed only as a settings key, invisible unless the user
+  opened the bar layout editor. Scope guards: the row is fan-neutral (its
+  writes are allowed while the daemon is degraded/offline — that is exactly
+  when a slower or faster re-read cadence matters), runs on a dedicated
+  Process (`settingsProc`) with its own 20 s deadline and its own error line
+  (`settingsError`), never takes the fan-write lock (`busy`), never pkexecs,
+  and deliberately stays OUTSIDE the two-section keyboard cursor model —
+  §6.2's frozen `visibleSections = ["presets","slider"]` is unchanged and the
+  keyboard map (§6.3) gains no keys. Affected: `Panel.qml` (state, two
+  functions, Process + deadline, REFRESH row, `RefreshChip` component),
+  `DESIGN.md §6.2` (this paragraph), `tests/panel-refresh.test.sh` (new,
+  structural — same pattern as `panel-slider.test.sh`), `tests/run-all.sh`
+  (8th suite) + the suite-count mirrors (`CONTRIBUTING.md`, `tests/AGENTS.md`,
+  root `AGENTS.md`), `README.md`, `docs/INSTALL.md` §6,
+  `docs/TROUBLESHOOTING.md` §4, `docs/ARCHITECTURE.md` (§2 row + §4.1),
+  `CHANGELOG.md` Unreleased. No `manifest.json` change: the schema keys
+  already exist from R9; the panel now also writes them.
+- **R9 — Advanced polling mode key (PROVISIONAL pending T3's live verification,
+  2026-09-17) + T2 slider-reset clarification.** Old schema (`DESIGN.md §1`,
+  `manifest.json`): three keys — `show` (enum, default `temp`), `poll_seconds`
+  (int 1–10, default 2, the only refresh knob), `release_after_minutes` (int
+  0–240, default 0); `Panel.qml` consumed `poll_seconds` directly with a 1–10
+  clamp. New schema: `poll_seconds` is kept unchanged as the *custom* value
+  (int 1–10, default 2, whole seconds only) **plus one toggle key** —
+  primary variant `{ "key": "poll_mode", "type": "enum", "label": "Refresh
+  mode", "options": ["auto", "custom"], "default": "auto" }` (recommended:
+  the two states are visible and self-describing); fallback variant
+  `{ "key": "poll_custom", "type": "boolean", "default": false }` if live
+  verification rejects the enum. Semantics (either spelling): mode `auto`
+  (default) ⇒ `pollSeconds` is exactly 2 s regardless of any leftover
+  `poll_seconds` value, so existing users keep today's behaviour without
+  touching anything; mode `custom` ⇒ `poll_seconds` clamped to whole seconds
+  1–10 (fractional and out-of-band values clamped, never fatal). Why: user
+  ask ("advanced toggle auto=current default/custom=user seconds", plan
+  `2026-09-17-advanced-polling-slider-plan.md` T3) + scope ruling (the
+  Advanced control governs how often **omafan re-reads the daemon's status**,
+  never how often the daemon samples the SMC — afanctl's `[poll]
+  interval_s = 1 s` is out of scope future work, evidence
+  `logs/2026-09-17-afanctl-polling-evidence.md`) + review evidence that the
+  shell's schema supports both spellings (built-in `boolean`/`enum` types)
+  while `poll_seconds` persistence via `shell.json` already works, so the
+  toggle is an addition on a working setting, not new plumbing. Affected:
+  T3 (implements `Panel.qml` mode math + live `omarchy bar set` verification),
+  T4 (this ruling + every mirror below, same changeset), T5 (extends
+  `tests/manifest.test.sh` + mode-math regression). Ruling: **provisional** —
+  T3 has not finished (no `poll_mode`/`poll_custom` key exists in the tree at
+  ruling time), so T4 writes the `poll_mode` enum variant into `manifest.json`
+  now and T3 must verify it live against the running shell before T5 closes;
+  if the shell's settings UI rejects the enum spelling, T3 swaps to the
+  `poll_custom` boolean variant and T4's mirrors move again in that same
+  changeset — never half-updated (the floor-chord gate failure is the warning
+  precedent). T4 does not edit `Panel.qml` poll/slider logic; the manifest
+  advertises `poll_mode` before the panel consumes it, and the two land
+  together. Mirrors moved with this ruling: `manifest.json`, `DESIGN.md §1`
+  block, `README.md` Settings table + panel paragraph, `docs/INSTALL.md` §6,
+  `docs/TROUBLESHOOTING.md` (§2 row + §4 frozen-temperature note),
+  `docs/ARCHITECTURE.md` (§2 responsibility row + §4.1), `tests/manifest.test.sh`
+  (keys, defaults, `poll_mode` options/default assertions; `poll_seconds`
+  bounds unchanged), `CHANGELOG.md` Unreleased. — T2 slider part (same
+  ruling, **bug fix, not a contract change**): a confirmed Auto must clear
+  `pendingRpm` (slider falls back to the band minimum, inactive) and a stale
+  hold document arriving after the Auto write must not repopulate it; no
+  `DESIGN.md §6` sentence prescribes the old behaviour (§6.2 lists
+  `pendingRpm` in state without reset semantics; the repopulation lives only
+  in `Panel.qml applyStatus`), so nothing in §6 contradicts the fix.
+  Proposed additive §6.2 wording for T2's changeset (not applied by T4):
+  *"`pendingRpm` is cleared to null on a confirmed Auto/release write, and a
+  status document is never allowed to repopulate it once cleared — the slider
+  then renders the band minimum until the user acts."* Affected: T2, T4
+  (changelog line), T5 (race regression).
 - **R8 — two documentation corrections from REVIEW-R1.** (a) `DESIGN.md §7` claimed
   `tests/keybindings.test.sh` reproduces the free-chord analysis; it runs entirely
   against a stub `hyprctl` and a sandboxed Lua tree, so the sentence now attributes

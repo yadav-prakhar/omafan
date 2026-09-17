@@ -66,9 +66,9 @@ Two consequences of this shape are worth stating plainly:
 
 | File | Owns | Never does |
 |---|---|---|
-| `manifest.json` | plugin identity, the `bar-widget` kind, the settings schema (`show`, `poll_seconds`, `release_after_minutes`) | describe behaviour that is not true |
+| `manifest.json` | plugin identity, the `bar-widget` kind, the settings schema (`show`, `poll_mode`, `poll_seconds`, `release_after_minutes`) | describe behaviour that is not true |
 | `BarWidget.qml` | the bar glyph/label, tooltip, left/right click and wheel gestures, hold tint | run a process, read a file, call `pkexec` (it forwards to `Panel.sendCommand`) |
-| `Panel.qml` | all shell-side side effects: the polling `Process`, the write `Process`, the busy lock, the 300 ms slider debounce, the undercooling confirmation, banners, the cursor model, the single `IpcHandler`, the `release_after_minutes` timer | talk to afanctl or `/sys` directly |
+| `Panel.qml` | all shell-side side effects: the polling `Process`, the write `Process`, the settings-write `Process` (`omarchy bar set` for the REFRESH row), the busy lock, the 300 ms slider debounce, the undercooling confirmation, banners, the cursor model, the single `IpcHandler`, the `release_after_minutes` timer | talk to afanctl or `/sys` directly |
 | `Model.js` | pure logic: the preset ladder, clamping/snapping, cycle order, status parsing, format helpers, staleness, the undercooling guard | import QML, do I/O, hold state |
 | `KeyboardHelp.qml` | the `?` key-map overlay: rows from a JS literal, `Text.PlainText` | steal keys (the panel owns `?` and `Esc`) |
 | `bin/omafan-ctl` | the only afanctl integration: verbs, globals, exit codes, the four JSON schemas, the hardware-limit cache, the undercooling refusal | write `/sys`/`/etc`; run `pkexec` for read verbs |
@@ -111,8 +111,19 @@ There are four reasons, in order of importance.
 
 ### 4.1 The panel poll
 
-- `poll_seconds` comes from the widget settings (schema: `int`, `1..10`,
-  default `2`); `Panel.qml` clamps a bad value into range.
+- The re-read cadence comes from the widget settings behind an Advanced
+  toggle: `poll_mode` (`auto`|`custom`, default `auto`) selects the mode and
+  `poll_seconds` (int, `1..10`, default `2`, whole seconds only) is the custom
+  value. Mode `auto` means exactly 2 s regardless of any leftover
+  `poll_seconds`; mode `custom` uses `poll_seconds` clamped into range.
+  `poll_seconds` clamped into range.
+  `Panel.qml` clamps a bad value into range. This governs how often omafan
+  re-reads the daemon's status, never how often the daemon samples the SMC
+  hardware (afanctl's own `[poll] interval_s`, 1 s, is out of scope).
+  Both keys are also settable from the panel itself: the mouse-only REFRESH
+ row (ruling R10) writes `poll_mode` / `poll_seconds` through
+ `omarchy bar set`, and a settings-only write is patched into the running
+ widgets in place — the cadence changes live, no reload.
 - The poll `Timer` is started **on load, not on open**. The bar widget reads
   the panel's parsed status while the panel is invisible, so the bar is live
   without the panel ever having been opened.

@@ -55,7 +55,7 @@ running, `jq`, and Node only if you want to run the `Model.js` suite.
 Every change must pass the hardware-free gate:
 
 ```sh
-bash tests/run-all.sh                     # 6 suites: plugin-validate, manifest, model, ctl, keybindings, qml-lint
+bash tests/run-all.sh                     # 8 suites: plugin-validate, manifest, model, ctl, keybindings, qml-lint, panel-slider, panel-refresh
 bash tests/run-all.sh --list              # the suite names
 bash tests/qml-lint.sh                    # QML lint (SKIPs cleanly without qmllint/shell tree)
 bash -n bin/omafan-ctl bin/omafan-keybindings

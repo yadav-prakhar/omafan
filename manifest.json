@@ -15,10 +15,11 @@
     "category": "Hardware",
     "allowMultiple": false,
     "defaultSection": "right",
-    "defaults": { "show": "temp", "poll_seconds": 2, "release_after_minutes": 0 },
+    "defaults": { "show": "temp", "poll_mode": "auto", "poll_seconds": 2, "release_after_minutes": 0 },
     "schema": [
       { "key": "show", "type": "enum", "label": "Bar shows", "options": ["icon", "temp", "rpm", "temp+rpm"], "default": "temp" },
-      { "key": "poll_seconds", "type": "int", "label": "Refresh interval (s)", "min": 1, "max": 10, "default": 2 },
+      { "key": "poll_mode", "type": "enum", "label": "Refresh mode", "options": ["auto", "custom"], "default": "auto" },
+      { "key": "poll_seconds", "type": "int", "label": "Custom refresh interval (s)", "min": 1, "max": 10, "default": 2 },
       { "key": "release_after_minutes", "type": "int", "label": "Return to firmware auto after (min, 0 = never)", "min": 0, "max": 240, "default": 0 }
     ]
   }

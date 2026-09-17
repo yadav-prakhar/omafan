@@ -47,10 +47,11 @@ slider control of the fan** plus a live readout — by driving the already-insta
     "category": "Hardware",
     "allowMultiple": false,
     "defaultSection": "right",
-    "defaults": { "show": "temp", "poll_seconds": 2, "release_after_minutes": 0 },
+    "defaults": { "show": "temp", "poll_mode": "auto", "poll_seconds": 2, "release_after_minutes": 0 },
     "schema": [
       { "key": "show", "type": "enum", "label": "Bar shows", "options": ["icon", "temp", "rpm", "temp+rpm"], "default": "temp" },
-      { "key": "poll_seconds", "type": "int", "label": "Refresh interval (s)", "min": 1, "max": 10, "default": 2 },
+      { "key": "poll_mode", "type": "enum", "label": "Refresh mode", "options": ["auto", "custom"], "default": "auto" },
+      { "key": "poll_seconds", "type": "int", "label": "Custom refresh interval (s)", "min": 1, "max": 10, "default": 2 },
       { "key": "release_after_minutes", "type": "int", "label": "Return to firmware auto after (min, 0 = never)", "min": 0, "max": 240, "default": 0 }
     ]
   }
@@ -343,7 +344,7 @@ Panel { id: root; moduleName: "io.github.yadav-prakhar.omafan"; ipcTarget: "omaf
                   open: root.opened; focusTarget: keyCatcher
                   PanelKeyCatcher { id: keyCatcher; onMoveRequested; onActivateRequested;
                                     onReturnRequested; onCloseRequested; onTabRequested; onTextKey }
-                    Column { /* hero, banners, presets, slider, footer */ } }
+                    Column { /* hero, banners, presets, slider, refresh, footer */ } }
   IpcHandler { target: "omafan"
     function toggle(): void
     function open(): void
@@ -367,6 +368,17 @@ the cursor treats as one row (`h`/`l` walks it, `k`/`j` leaves it) — rendered 
 (`h`/`l` walks the chips, `k`/`j` moves to/from `slider`); `slider` is
 a lone row with `selectedIndex = -1`. Mouse hover sets the same cursor state so
 keyboard and pointer share one highlight.
+
+Below the slider sits a mouse-only REFRESH row (ruling R10): `Auto` and
+`Custom` chips pick the refresh mode and, in custom mode, a `−`/`+` stepper
+moves the interval by one whole second within 1–10 (clamped through
+`Model.effectivePollSeconds`). Both write through the shell's own
+`omarchy bar set` write path — no new privilege, no direct `shell.json`
+editing — and a settings-only write is patched into the running widgets in
+place, so `pollSeconds` re-evaluates live without a reload. The row is
+fan-neutral: its writes are allowed while the daemon is degraded/offline, run
+on a dedicated Process with its own 20 s deadline, and it deliberately stays
+OUTSIDE the two-section cursor model above.
 
 ### 6.3 Keyboard map (frozen; §7 of `docs/KEYBINDINGS.md` mirrors this)
 

@@ -22,7 +22,10 @@ const NAMES = [
 // T02b adds the two DESIGN.md §5.1 guard functions additively: the T02 list and
 // its assertion stay as they were, and only the sandbox export grows.
 const GUARD_NAMES = ["isUndercoolingHot", "undercoolingWarning"];
-const ALL_NAMES = NAMES.concat(GUARD_NAMES);
+// T3 (Advanced polling control) adds the mode-math function the same way:
+// the lists above and their assertions stay frozen, only the export grows.
+const POLL_NAMES = ["effectivePollSeconds"];
+const ALL_NAMES = NAMES.concat(GUARD_NAMES, POLL_NAMES);
 
 let Model;
 try {
@@ -107,6 +110,8 @@ record(NAMES.every((n) => typeof Model[n] === "function"),
   "Model.js exports all 17 DESIGN.md §5 functions as functions");
 record(GUARD_NAMES.every((n) => typeof Model[n] === "function"),
   "Model.js exports both DESIGN.md §5.1 guard functions as functions");
+record(POLL_NAMES.every((n) => typeof Model[n] === "function"),
+  "Model.js exports the T3 polling mode function as a function");
 
 // --- ES5-safety / purity of the source (the QML + Node dual use) ---------
 
@@ -358,6 +363,49 @@ eq("undercoolingWarning is a single sentence",
   (warning.match(/[.!?](\s|$)/g) || []).length, 1);
 contains("undercoolingWarning falls back to Auto above the ladder ceiling",
   Model.undercoolingWarning(guardStatus(97, 9000), 1200), "Auto (firmware)");
+
+// --- effectivePollSeconds (Advanced polling control, T3) ------------------
+// Auto (the default) is exactly 2 s regardless of any leftover poll_seconds,
+// so existing shell.json files keep today's behaviour untouched. Custom uses
+// poll_seconds in whole seconds 1-10: fractional or non-numeric input is
+// ignored (falls back to 2); whole seconds outside 1-10 are clamped.
+
+eq("effectivePollSeconds auto ignores the default value",
+  Model.effectivePollSeconds("auto", 2), 2);
+eq("effectivePollSeconds auto ignores a leftover nondefault value",
+  Model.effectivePollSeconds("auto", 7), 2);
+eq("effectivePollSeconds missing mode is auto (2 s)",
+  Model.effectivePollSeconds(undefined, 5), 2);
+eq("effectivePollSeconds null mode is auto (2 s)",
+  Model.effectivePollSeconds(null, 5), 2);
+eq("effectivePollSeconds unknown mode is auto (2 s)",
+  Model.effectivePollSeconds("bogus", 5), 2);
+eq("effectivePollSeconds custom uses the default value",
+  Model.effectivePollSeconds("custom", 2), 2);
+eq("effectivePollSeconds custom uses a nondefault whole value",
+  Model.effectivePollSeconds("custom", 5), 5);
+eq("effectivePollSeconds custom accepts the lower bound",
+  Model.effectivePollSeconds("custom", 1), 1);
+eq("effectivePollSeconds custom accepts the upper bound",
+  Model.effectivePollSeconds("custom", 10), 10);
+eq("effectivePollSeconds custom accepts a numeric string (bar set without --json)",
+  Model.effectivePollSeconds("custom", "5"), 5);
+eq("effectivePollSeconds custom clamps zero up to the floor",
+  Model.effectivePollSeconds("custom", 0), 1);
+eq("effectivePollSeconds custom clamps a negative up to the floor",
+  Model.effectivePollSeconds("custom", -3), 1);
+eq("effectivePollSeconds custom clamps an over-max value down to the ceiling",
+  Model.effectivePollSeconds("custom", 99), 10);
+eq("effectivePollSeconds custom rejects fractional seconds",
+  Model.effectivePollSeconds("custom", 2.5), 2);
+eq("effectivePollSeconds custom rejects a non-numeric string",
+  Model.effectivePollSeconds("custom", "abc"), 2);
+eq("effectivePollSeconds custom rejects an empty string",
+  Model.effectivePollSeconds("custom", ""), 2);
+eq("effectivePollSeconds custom rejects null",
+  Model.effectivePollSeconds("custom", null), 2);
+eq("effectivePollSeconds custom rejects undefined",
+  Model.effectivePollSeconds("custom", undefined), 2);
 
 // --- summary -------------------------------------------------------------
 

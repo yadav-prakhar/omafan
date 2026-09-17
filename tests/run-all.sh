@@ -38,7 +38,7 @@ run_suite() {
 }
 
 if [[ ${1:-} == --list ]]; then
-    echo "plugin-validate manifest.test.sh model.test.mjs ctl.test.sh keybindings.test.sh qml-lint.sh"
+    echo "plugin-validate manifest.test.sh model.test.mjs ctl.test.sh keybindings.test.sh qml-lint.sh panel-slider.test.sh panel-refresh.test.sh"
     exit 0
 fi
 
@@ -58,6 +58,10 @@ run_suite "ctl" tests/ctl.test.sh bash tests/ctl.test.sh
 run_suite "keybindings" tests/keybindings.test.sh bash tests/keybindings.test.sh
 # 6. QML lint against the installed shell
 run_suite "qml-lint" tests/qml-lint.sh bash tests/qml-lint.sh
+# 7. T2 slider Auto-reset regression (structural Panel.qml guard assertions)
+run_suite "panel-slider" tests/panel-slider.test.sh bash tests/panel-slider.test.sh
+# 8. T5 panel refresh row regression (structural Panel.qml settings-write assertions)
+run_suite "panel-refresh" tests/panel-refresh.test.sh bash tests/panel-refresh.test.sh
 
 echo
 echo "PASS suites ${pass_suites} / FAIL suites ${fail_suites} / SKIP ${skip_suites}"

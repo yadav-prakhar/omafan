@@ -169,18 +169,27 @@ To undo this step: `"$OMAFAN_DIR/bin/omafan-keybindings" remove`.
 
 Three per-widget settings live in the shell's bar layout. Change them with
 `omarchy bar set` (use the plugin id as the widget id) or edit `shell.json`
-directly:
+directly (integer values need `--json`, otherwise the shell stores a string —
+the panel coerces both, but `--json` keeps `shell.json` clean). The refresh
+cadence also has an in-panel control: the panel's REFRESH row (Auto/Custom
+chips and a ±1 s stepper) writes these same keys, so you never have to open a
+terminal. The Advanced toggle itself: `auto`
+re-reads the daemon every 2 s (the default); `custom` uses your
+`poll_seconds` instead. This governs how often omafan re-reads status, never
+how often the daemon samples the SMC hardware:
 
 ```sh
 omarchy bar set io.github.yadav-prakhar.omafan show temp+rpm
-omarchy bar set io.github.yadav-prakhar.omafan poll_seconds 5
-omarchy bar set io.github.yadav-prakhar.omafan release_after_minutes 30
+omarchy bar set io.github.yadav-prakhar.omafan poll_mode custom
+omarchy bar set io.github.yadav-prakhar.omafan poll_seconds 5 --json
+omarchy bar set io.github.yadav-prakhar.omafan release_after_minutes 30 --json
 ```
 
 | Key | Values | Default | Meaning |
 |---|---|---|---|
 | `show` | `icon`, `temp`, `rpm`, `temp+rpm` | `temp` | what the bar label renders |
-| `poll_seconds` | `1`–`10` | `2` | status refresh interval |
+| `poll_mode` | `auto`, `custom` | `auto` (= 2 s) | Advanced toggle: fixed 2 s cadence, or your custom seconds |
+| `poll_seconds` | `1`–`10` | `2` | custom status refresh interval in whole seconds (used only when `poll_mode` is `custom`) |
 | `release_after_minutes` | `0`–`240` | `0` (never) | return the fan to firmware auto after N minutes without interaction |
 
 `release_after_minutes` is an optional safety net for a forgotten hold; its
