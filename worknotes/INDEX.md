@@ -10,7 +10,7 @@ What belongs here and what does not: [README.md](README.md).
 | Marketplace submission #7174 — validation, security flags, the `dev`-branch split (R11) | [2026-09-16-marketplace-submission](2026-09-16-marketplace-submission/SUMMARY.md) | active — awaiting maintainer | 2026-09-16 | 2026-09-20 |
 | Slider Auto-reset + Advanced polling control (R9) | [2026-09-17-advanced-polling](2026-09-17-advanced-polling/SUMMARY.md) | done | 2026-09-17 | 2026-09-17 |
 | In-panel refresh row — Auto/Custom + stepper (R10) | [2026-09-17-in-panel-refresh](2026-09-17-in-panel-refresh/SUMMARY.md) | done | 2026-09-17 | 2026-09-17 |
-| The development record moves into the repository (R12) | [2026-09-20-in-repo-worknotes](2026-09-20-in-repo-worknotes/SUMMARY.md) | active | 2026-09-20 | 2026-09-20 |
+| The development record moves into the repository (R12) | [2026-09-20-in-repo-worknotes](2026-09-20-in-repo-worknotes/SUMMARY.md) | done | 2026-09-20 | 2026-09-20 |
 
 The roadmap — what is done and what is next — is [BACKLOG.md](BACKLOG.md).
 

@@ -1,6 +1,6 @@
 ---
 feature: in-repo-worknotes
-status: active
+status: done
 branch: dev
 opened: 2026-09-20
 updated: 2026-09-20

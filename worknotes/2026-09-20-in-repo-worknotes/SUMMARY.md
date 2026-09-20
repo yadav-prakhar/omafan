@@ -1,6 +1,6 @@
 ---
 feature: in-repo-worknotes
-status: active
+status: done
 branch: dev
 opened: 2026-09-20
 updated: 2026-09-20
@@ -18,6 +18,9 @@ work, the four fixed files inside it, an index and a roadmap; the retired
 external note vault migrated into it with content unedited; the last piece of
 development material removed from the shipped `docs/` tree; and a pre-commit hook
 that refuses to let any of it reach the default branch.
+
+**Commit:** `5d18d7a` — `chore(repo): keep the development record in the
+repository (worknotes/)`, 2026-09-20, branch `dev`.
 
 ## Shipped
 

@@ -1,6 +1,6 @@
 ---
 feature: in-repo-worknotes
-status: active
+status: done
 branch: dev
 opened: 2026-09-20
 updated: 2026-09-20
@@ -177,3 +177,21 @@ the run above; the new `worknotes/` and `.githooks/` directories do not trip it.
   repository is left uncommitted there for the operator to review and commit.
 - No new suite was added, deliberately: `tests/` asserts nothing about
   `worknotes/`, so a red gate keeps meaning "the plugin is broken".
+
+## Landed — 2026-09-20
+
+```text
+$ git log --oneline -1
+5d18d7a chore(repo): keep the development record in the repository (worknotes/)
+```
+
+Re-run on the committed tree, after this folder's status was moved to `done`:
+
+```text
+$ bash tests/run-all.sh
+PASS suites 8 / FAIL suites 0 / SKIP 0
+```
+
+The operator's vault copy of these notes was deleted the same day; the deletion
+is left uncommitted in the vault's own repository for the operator to review and
+commit there.
