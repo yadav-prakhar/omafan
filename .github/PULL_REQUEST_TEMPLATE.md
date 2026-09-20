@@ -28,6 +28,9 @@ $ bash tests/run-all.sh
 - [ ] `DESIGN.md` is unchanged — **or** a `DEVIATIONS.md` entry is included and the ruling id is in the commit body
 - [ ] Every mirror of a changed constant was updated (docs, README, PRD, tests)
 - [ ] `CHANGELOG.md` has an `Unreleased` entry for user-visible changes
+- [ ] For work on the `dev` branch: the feature's `worknotes/<slug>/` folder is
+      updated — `LOG.md` with the evidence above, `SUMMARY.md` when it closes —
+      or N/A
 - [ ] Screenshots in the diff show the current build
 
 ## Notes for the reviewer

@@ -446,7 +446,9 @@ on the [`dev` branch](https://github.com/yadav-prakhar/omafan/tree/dev): the age
 notes (`AGENTS.md` at the root plus per-directory notes in `bin/` and `tests/`),
 the task procedures in `skills/` (running the gate, verifying in a live shell,
 changing a frozen contract, capturing screenshots, cutting a release), the build
-record (`PLAN.md`, `QUESTIONS.md`, `docs/BUILD-LOG.md`, `orchestration/`) and the
+record (`PLAN.md`, `QUESTIONS.md`, `orchestration/`), the development record for
+everything after it — `worknotes/`, one folder per piece of work holding its
+plan, its evidence, its review and its summary — and the
 `orchestration/live-install.sh` live-check tool.
 
 ```sh

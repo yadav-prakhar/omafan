@@ -126,8 +126,12 @@ Rules that keep the log honest:
 - One logical change per commit; rebase rather than merging `master` in, so the
   history stays linear.
 - Say what you **ran** and what it printed. "Tests pass" is not evidence.
+- Record the work in `worknotes/` as it happens: the feature folder's `LOG.md`
+  carries the command output and `SUMMARY.md` closes it. A commit body summarises
+  that evidence; it is not the place the evidence lives.
 - Never commit `.recon/`, `.omo/` or test scratch — they are gitignored on
-  purpose.
+  purpose. Development material never reaches the default branch (`worknotes/`,
+  `skills/`, `orchestration/`, the `AGENTS.md` files, `PLAN.md`, `QUESTIONS.md`).
 - Version bumps and changelog entries belong in the release commit, not in
   feature commits; use the `Unreleased` section while you work (see
   [CHANGELOG.md](CHANGELOG.md), Keep a Changelog format).
@@ -183,14 +187,26 @@ is on the [`dev` branch](https://github.com/yadav-prakhar/omafan/tree/dev):
 |---|---|
 | `AGENTS.md`, `bin/AGENTS.md`, `tests/AGENTS.md` | the local invariants for the root, `bin/` and `tests/` |
 | `skills/` | task-shaped procedures: running the gates, verifying in a live shell, changing a frozen contract, capturing screenshots, cutting a release |
-| `PLAN.md`, `QUESTIONS.md`, `docs/BUILD-LOG.md` | the build plan, worker questions and the build audit trail |
-| `orchestration/` | the full build record: tickets, ledger, adversarial reviews, and the `dispatch.sh` / `live-install.sh` tools |
+| `worknotes/` | the development record for everything after the build: one folder per piece of work, holding `PLAN.md`, `LOG.md`, `REVIEW.md` and `SUMMARY.md` |
+| `PLAN.md`, `QUESTIONS.md`, `orchestration/` | the build-era record: plan, worker questions, ticket cards, ledger, adversarial reviews, `BUILD-LOG.md`, and the `dispatch.sh` / `live-install.sh` tools |
+| `.githooks/pre-commit` | refuses a commit on the default branch that touches any path in this table |
 
 ```sh
 git fetch origin dev
 git show dev:AGENTS.md | less
 git show dev:skills/run-the-gates/SKILL.md | less
+git show dev:worknotes/README.md | less
 ```
+
+If you work on `dev`, enable the guard once per clone:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+It refuses a commit on the default branch that touches development material.
+There is no CI to catch that otherwise, and the cost is not theoretical: users
+install this repository by cloning it.
 
 Contributors — human or agent — are held to the same rules as a human patch:
 real evidence, no invented output, no hardware writes in the gate.

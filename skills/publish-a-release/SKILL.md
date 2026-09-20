@@ -78,5 +78,7 @@ reason.
 - Verify the push: `git ls-remote --tags origin | grep vX.Y.Z`.
 - If the listing is live, check `https://plugins.omarchy.org/catalog.json`
   contains the new description and version.
-- Record the release in `orchestration/LEDGER.md` (newest first) if you are
-  working from that history, so the flight recorder stays complete.
+- Record the release in the feature's `worknotes/<slug>/LOG.md` and close it with
+  a `SUMMARY.md` line (`worknotes/README.md`). Record it in
+  `orchestration/LEDGER.md` (newest first) only if you are working from that
+  build-era history, so the flight recorder stays complete.

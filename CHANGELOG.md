@@ -79,12 +79,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   agent inside someone else's install are gone from it: the agent notes
   (`AGENTS.md` at the root, plus `bin/AGENTS.md` and `tests/AGENTS.md`), the task
   procedures in `skills/`, the build record (`PLAN.md`, `QUESTIONS.md`,
-  `docs/BUILD-LOG.md`, `orchestration/`) and the `orchestration/live-install.sh`
+  `orchestration/`) and the `orchestration/live-install.sh`
   orchestrator tool now live on the `dev` branch. `DESIGN.md §9` (the build-era
   conventions block) is retired with them, the root `README.md` and
   `CONTRIBUTING.md` document the branch split instead of the removed files, and
   `DESIGN.md §10` caught up with the gate's eight suites (ruling R11). No runtime
   file, no privilege surface and no manifest change.
+
+- **The development record lives in the repository** (`dev` branch). A
+  `worknotes/` tree replaces the maintainer's external note vault: one folder per
+  piece of work, holding `PLAN.md`, `LOG.md`, `REVIEW.md` and `SUMMARY.md`, with
+  frontmatter carrying a `planned | active | blocked | done | unverified` status,
+  plus `INDEX.md` and `BACKLOG.md`. `docs/` is now shipped surface only — the
+  build audit trail moved from `docs/BUILD-LOG.md` to `orchestration/BUILD-LOG.md`
+  with it — and `.githooks/pre-commit`, enabled with
+  `git config core.hooksPath .githooks`, refuses a commit on the default branch
+  that touches development material (ruling R12). No runtime file, no privilege
+  surface and no manifest change.
 
 ## [1.0.0] - 2026-09-15
 

@@ -17,9 +17,11 @@ run, in what order, and which traps have already bitten this project.
 
 Read the skill that matches the task before editing, and follow its commands
 literally — they were run on the reference machine and the outputs are quoted in
-[CHANGELOG.md](../CHANGELOG.md) and the `orchestration/` record. The
+[CHANGELOG.md](../CHANGELOG.md), the `orchestration/` record and the feature's
+[`worknotes/`](../worknotes/README.md) folder. The
 per-directory `AGENTS.md` files ([root](../AGENTS.md), [bin](../bin/AGENTS.md),
-[tests](../tests/AGENTS.md)) carry the invariants; the skills carry the moves.
+[tests](../tests/AGENTS.md)) carry the invariants; the skills carry the moves, and
+[`worknotes/`](../worknotes/README.md) carries the record of what was done.
 
 If your agent runtime loads skills from a directory (Hermes, Claude Code, and
 similar), point it at this folder or copy/symlink the directories into its skill

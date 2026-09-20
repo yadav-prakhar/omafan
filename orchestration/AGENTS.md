@@ -8,6 +8,8 @@ Build history, not runtime: the record of how this repo was built by dispatched 
 tickets/        one card per build ticket (T01..T16 plus lettered sub-tickets)
 instructions/   WORKER.md, the briefing every worker subagent read first
 LEDGER.md       distilled flight recorder, one line per dispatch/verify/ruling/commit
+BUILD-LOG.md    the phase-by-phase audit trail of the build (P1..P6), moved out of
+                docs/ by ruling R12 so the shipped docs tree stays shipped-only
 REVIEW-R*.md    adversarial review verdicts (T15, T16)
 TRIAGE-R*.md    disposition of each review finding (accepted, fixed, open)
 QUESTIONS.md    worker objections and cross-file change requests
@@ -21,6 +23,7 @@ backups/        shell.json backups made by live-install.sh (gitignored)
 | Question | File |
 |---|---|
 | What happened, condensed | `LEDGER.md` (newest first) |
+| What each build phase did, in order | `BUILD-LOG.md` |
 | What a ticket asked | `tickets/<ID>.md`, the card is authoritative |
 | How a review finding was handled | `TRIAGE-R1.md` / `TRIAGE-R2.md` |
 | What reviewers rejected | `REVIEW-R1.md` / `REVIEW-R2.md` |

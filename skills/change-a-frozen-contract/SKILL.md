@@ -64,8 +64,9 @@ nickname-change or a hunch is not a ruling.
 
 - Do not silently diverge and fix the docs later — the gate will not catch it,
   and the docs will be wrong in three places by then.
-- Do not edit old deviation entries or ticket cards; corrections are new entries
-  and `orchestration/LEDGER.md` lines.
+- Do not edit old deviation entries, ticket cards or a closed `worknotes/`
+  section; corrections are new entries, `orchestration/LEDGER.md` lines, or a new
+  dated section in the feature's `LOG.md`.
 - Do not change an assertion to match new behaviour without the mirror sweep —
   that is how the stale `omafan: fans off (floor)` expectation survived a rename
   and left the suite red on a clean tree.

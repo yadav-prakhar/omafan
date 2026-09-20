@@ -198,7 +198,9 @@ so a script that bypasses the panel gets the identical refusal.
 model), §4 (CLI), §5 (Model.js), §6 (QML), §7 (keybindings), §8 (safety),
 §10 (tests). A change to any of those is proposed in `DEVIATIONS.md`, never
 made silently. The requirements behind every decision are in `PRD.md`. The build
-record that produced it (`PLAN.md`, `QUESTIONS.md`, `docs/BUILD-LOG.md`,
-`orchestration/`) is kept on the `dev` branch, together with the agent notes and
-the `orchestration/live-install.sh` orchestrator tool — the default branch ships
-the plugin, its tests and this documentation only (ruling R11).
+record that produced it (`PLAN.md`, `QUESTIONS.md`, `orchestration/`, whose
+`BUILD-LOG.md` is the phase-by-phase audit trail) and the development record for
+everything after it (`worknotes/`, one folder per piece of work) are kept on the
+`dev` branch, together with the agent notes and the `orchestration/live-install.sh`
+orchestrator tool — the default branch ships the plugin, its tests and this
+documentation only (rulings R11, R12).

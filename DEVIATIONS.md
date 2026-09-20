@@ -64,6 +64,40 @@ because these two files were owned by completed tickets:
   overrides, and a fresh state writes normally. Not yet covered by a regression
   case in `tests/ctl.test.sh` (open item, listed in `docs/BUILD-LOG.md`).
 
+- **R12 — work records live in the repository; `docs/` is shipped surface only
+  (operator direction, 2026-09-20).** Old: the root `AGENTS.md` WORK RECORDS
+  block told every agent to record all work in the maintainer's Obsidian vault at
+  an absolute path outside the repository (`plans/`, `logs/`, `reviews/`,
+  `done/`), and one piece of development material — the build audit trail
+  `docs/BUILD-LOG.md` — sat inside the `docs/` tree that ships to the default
+  branch. New: a top-level `worknotes/` tree on `dev`, one folder per piece of
+  work named `<YYYY-MM-DD>-<slug>` holding fixed files (`PLAN.md` before the work,
+  `LOG.md` while it happens, `REVIEW.md` for findings, `SUMMARY.md` at the end,
+  `ASK.md` when the ask is a note), plus a repo-wide `INDEX.md` and the roadmap in
+  `BACKLOG.md`, every file carrying `status: planned|active|blocked|done|unverified`
+  frontmatter; the audit trail moved to `orchestration/BUILD-LOG.md`, leaving the
+  `docs/` tree 100% shipped; the vault was retired for this repository, its 19
+  omafan notes migrated with their content unedited and nothing left behind as a
+  pointer; and `.githooks/pre-commit` refuses a commit on the default branch that
+  touches any development-only path — there is no CI, so a local hook is the only
+  mechanical guard available. Why: operator direction ("any work done should be
+  notes within the repository … nothing irrelevant for deployment/end user should
+  go there") + the R11 hazard that a clone carries development material into a
+  stranger's installation + the failure mode of a record outside version control:
+  it cannot be reviewed, diffed, bisected or cited from a commit. R11's
+  affected-file list still names `docs/BUILD-LOG.md` because that was its path at
+  that ruling. Affected: `AGENTS.md` (header, STRUCTURE, WHERE TO LOOK, WORK
+  RECORDS), `CONTRIBUTING.md`, `README.md`, `PRD.md` (D5 + the reference list),
+  `docs/ARCHITECTURE.md` §6, `CHANGELOG.md` Unreleased, `skills/README.md`,
+  `skills/run-the-gates`, `skills/change-a-frozen-contract`,
+  `skills/publish-a-release`, `.github/PULL_REQUEST_TEMPLATE.md`,
+  `orchestration/AGENTS.md`, and the new `worknotes/` + `.githooks/` trees.
+  Migration mapping and its verification: `worknotes/2026-09-20-in-repo-worknotes/LOG.md`.
+  Ruling: accepted — no runtime file, no privilege surface, no manifest change,
+  and the hardware-free gate is deliberately untouched: `tests/` asserts nothing
+  about `worknotes/`, because a red suite must mean the plugin is broken, not that
+  a note is stale.
+
 - **R11 — the distributed tree is the runtime plus documentation (marketplace
   review, 2026-09-17).** Old: the repository cloned and installed by users carried
   development material — root `AGENTS.md` (whose WORK RECORDS block told agents to

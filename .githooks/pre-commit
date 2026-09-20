@@ -1,0 +1,37 @@
+#!/bin/sh
+# Refuse to put development material on the default branch.
+#
+# `omarchy plugin add` clones the whole repository into a user's shell config, so
+# the default branch carries the plugin, its tests and the operator documentation
+# only (DEVIATIONS.md R11, R12). This repository has no CI, so a local hook is the
+# only thing that can catch a stray `worknotes/` or `AGENTS.md` commit.
+#
+# Enable once per clone:  git config core.hooksPath .githooks
+# Bypass deliberately:    OMAFAN_ALLOW_DEV_PATHS=1 git commit ...
+set -u
+
+[ "${OMAFAN_ALLOW_DEV_PATHS:-0}" = "1" ] && exit 0
+
+branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo "")
+case "$branch" in
+    master | main) ;;
+    *) exit 0 ;;   # detached HEAD (rebase, cherry-pick) or a normal feature branch
+esac
+
+dev_paths='^AGENTS\.md$|^bin/AGENTS\.md$|^tests/AGENTS\.md$|^skills/|^worknotes/|^orchestration/|^PLAN\.md$|^QUESTIONS\.md$|^\.githooks/'
+
+offenders=$(git diff --cached --name-only --diff-filter=ACMR | grep -E "$dev_paths" || true)
+[ -n "$offenders" ] || exit 0
+
+printf 'pre-commit: refusing to commit development material on %s\n\n' "$branch" >&2
+printf '%s\n' "$offenders" | sed 's/^/  /' >&2
+cat >&2 <<'MSG'
+
+These paths exist to develop omafan and must never reach the default branch:
+users clone it into ~/.config/omarchy/plugins/<id> (DEVIATIONS.md R11, R12).
+
+    git switch dev      # land the change there instead
+
+Deliberate override: OMAFAN_ALLOW_DEV_PATHS=1 git commit ...
+MSG
+exit 1

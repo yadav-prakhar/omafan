@@ -5,15 +5,18 @@
 > `~/.config/omarchy/plugins/<id>`, so the default branch carries the QML,
 > `Model.js`, `bin/`, `tests/`, `PRD.md` and `docs/` only. Everything that exists
 > *only* here — this file, `bin/AGENTS.md`, `tests/AGENTS.md`, `skills/`,
-> `PLAN.md`, `QUESTIONS.md`, `docs/BUILD-LOG.md`, `orchestration/` — is
-> development material: never merge it into `master` (ruling R11 in
-> `DEVIATIONS.md`). Syncing is one-way, after runtime commits land on `master`:
+> `worknotes/`, `PLAN.md`, `QUESTIONS.md`, `orchestration/`, `.githooks/` — is
+> development material: never merge it into `master` (rulings R11 and R12 in
+> `DEVIATIONS.md`; `.githooks/pre-commit` refuses a commit on the default branch
+> that touches those paths, once `git config core.hooksPath .githooks` is set).
+> Syncing is one-way, after runtime commits land on `master`:
 > `git checkout dev && git merge --ff-only master`.
 > The conventions block `DESIGN.md §9` used to carry is retired with the rest;
 > its technical rules now live in `CONTRIBUTING.md` §"Code conventions".
 
 **Generated:** 2026-09-16
-**Revalidated:** 2026-09-20 against the tree at commit `57d5f63`
+**Revalidated:** 2026-09-20 against the tree at commit `57d5f63`, plus the
+in-repo work-records migration ([`worknotes/2026-09-20-in-repo-worknotes/`](worknotes/2026-09-20-in-repo-worknotes/PLAN.md))
 **Commit:** 57d5f63
 **Branch:** dev
 
@@ -34,8 +37,10 @@ daemon; never touches `/sys` itself.
 ├── tests/             # hardware-free gate (bash harness + fixtures)
 ├── docs/              # operator docs (ARCHITECTURE, SAFETY, TESTING, ...) + docs/images/
 ├── skills/            # task-shaped procedures for agents (run-the-gates, live-verify-*)
+├── worknotes/         # the development record: one folder per piece of work
+├── .githooks/         # pre-commit guard: dev-only paths never reach the default branch
 ├── .github/           # PR template + issue templates (no CI workflows)
-├── orchestration/     # build tickets/logs (history, not runtime)
+├── orchestration/     # build-era record: tickets, ledger, reviews, BUILD-LOG.md
 ├── DESIGN.md          # FROZEN contract; changes need DEVIATIONS.md ruling
 ├── CONTRIBUTING.md    # branch naming, commit conventions, gates, PR flow
 ├── SECURITY.md        # threat surface, reporting, supported versions
@@ -58,6 +63,8 @@ the current build) and `docs/images/*` (bar widget, `?` overlay).
 | Contract | `DESIGN.md` + `DEVIATIONS.md` | 8 deviation rulings (R1–R8) |
 | How to contribute | `CONTRIBUTING.md` | branches `<type>/<slug>`, Conventional Commits with a scope |
 | Task procedures for agents | `skills/<name>/SKILL.md` | gates, live verify, frozen-contract change, screenshots, release |
+| Development record | `worknotes/INDEX.md` | one folder per piece of work; inside: `PLAN.md`, `LOG.md`, `REVIEW.md`, `SUMMARY.md` |
+| The build record | `orchestration/` | frozen: tickets, `LEDGER.md`, `BUILD-LOG.md`, reviews, dispatch tools |
 
 ## CODE MAP
 No LSP/codegraph coverage for QML+bash (centrality unmeasured; from reads).
@@ -75,21 +82,26 @@ No LSP/codegraph coverage for QML+bash (centrality unmeasured; from reads).
 | `fake-afanctl` | fixture | `tests/fixtures/` | hardware-free daemon stand-in |
 
 ## WORK RECORDS (MANDATORY)
-- Record all work for this repository in the Obsidian folder
-  `/home/prakhar/Documents/Default/Workspace/omarchy plugin development/omafan`.
-- Organize notes by purpose: `plans/` for phased plans and tickets, `logs/` for
-  implementation decisions and command evidence, `reviews/` for findings and
-  verification, and `done/` for completion summaries linked to the related notes.
-- Use dated, descriptive filenames and relative links between related notes.
-  Keep records current as work progresses; distinguish planned, completed,
-  blocked, and unverified work. Never claim a check passed without evidence.
-- Add other subfolders only when useful and explain their purpose in the notes.
-  Preserve existing notes; do not reorganize or overwrite unrelated material.
-- Obsidian records supplement, not replace, repository documentation, tests,
-  CHANGELOG.md, and required DEVIATIONS.md rulings.
-- The Advanced polling control work is scoped to omafan status refresh only.
-  afanctl hardware polling control is future work; do not conflate the two.
-  If future work changes afanctl, also document it in its Obsidian project folder.
+- Record all work for this repository in `worknotes/`, in the repository: one
+  folder per piece of work, `<YYYY-MM-DD>-<slug>`, holding fixed files —
+  `PLAN.md` before the work, `LOG.md` while it happens (the commands and their
+  real output), `REVIEW.md` for findings, `SUMMARY.md` at the end, and `ASK.md`
+  when the ask is a note. `worknotes/README.md` is the contract;
+  `worknotes/INDEX.md` lists every folder and is the entry point.
+- A folder is opened when the work starts and listed in `INDEX.md` in the same
+  change. Frontmatter carries `status: planned|active|blocked|done|unverified`;
+  keep it true, and distinguish planned from done. Never claim a check passed
+  without evidence — quote the command and its output.
+- Notes supplement, and never replace, repository documentation, tests,
+  `CHANGELOG.md`, and required `DEVIATIONS.md` rulings: a contract change still
+  needs its ruling, a behaviour change still needs its test.
+- `orchestration/` is the frozen build-era record; do not edit it or add tickets
+  there. New work goes in `worknotes/`.
+- Never write an absolute home path into a tracked file — the record must be
+  readable on a machine that is not the maintainer's.
+- The Advanced polling control is scoped to omafan status refresh only. afanctl
+  hardware polling control is future work; do not conflate the two. If future
+  work changes afanctl, record it in that project's own repository.
 
 ## CONVENTIONS
 - Fan command never originates in QML: QML → `omafan-ctl` → `pkexec afanctl`.

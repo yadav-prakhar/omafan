@@ -154,7 +154,9 @@ omafan's differentiators, each a requirement below:
 - **D5** The build trail is auditable in the repository: requirements (`PRD.md`),
   the frozen contract (`DESIGN.md`) and its change channel (`DEVIATIONS.md`) ship
   on the default branch, and the development record (`PLAN.md`, `QUESTIONS.md`,
-  `docs/BUILD-LOG.md`, `orchestration/`) is kept on the `dev` branch.
+  `orchestration/`) is kept on the `dev` branch, together with `worknotes/` — one
+  folder per piece of post-build work, holding its plan, its evidence, its review
+  and its summary (rulings R11, R12).
 
 ### 3.5 Licences of referenced work
 
@@ -209,5 +211,6 @@ Every line below must be demonstrated with real output, not asserted:
   `shell/Ui/{Panel,KeyboardPanel,PanelKeyCatcher,PanelSlider,WidgetButton,BarWidget,PanelActionButton,ButtonGroup,ToggleSwitch}.qml`,
   `shell/Commons/{Style,Color}.qml`, `shell/plugins/panels/monitor/Panel.qml`,
   `/usr/share/omarchy/bin/omarchy-plugin-validate`.
-- Operator's original intent note: kept with the project's own working notes (the
-  Obsidian project folder for omafan), not shipped in this repository.
+- Operator's original intent note: kept with the project's own working notes, now
+  inside the repository — `worknotes/2026-09-17-advanced-polling/ASK.md` (ruling
+  R12) — and never shipped to the default branch.
