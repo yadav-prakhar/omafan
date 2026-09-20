@@ -1,11 +1,12 @@
 # PRD — omafan: an Omarchy shell plugin for the A1708 single-fan Intel Mac
 
-**Author:** orchestrator (Hermes Agent), for Prakhar Yadav
+**Author:** Prakhar Yadav, with the build run by an orchestrating agent.
 **Date:** 2026-09-15 (IST)
 **Status:** approved by the operator's instruction ("make it, test it, run it,
 ensure nothing breaks or collides with something else"); implementation is
-governed by `PLAN.md`, interfaces by `DESIGN.md`.
-**Reader:** the orchestrator agent and every subagent it dispatches. This
+governed by `DESIGN.md` (the build plan itself is on the `dev` branch).
+**Reader:** anyone auditing or extending omafan — contributor, reviewer or
+coding agent. This
 document is self-contained: nothing here depends on a chat session, and every
 environmental claim was re-verified live on the target machine during this
 build (see §2). Where a fact came from an external source it is cited.
@@ -150,8 +151,10 @@ omafan's differentiators, each a requirement below:
 - **D4** Marketplace submission prepared but **not** sent: the exact issue body
   (category, tags, repo link, description) is left in `docs/PUBLISHING.md` for
   the operator to paste.
-- **D5** The build trail (`PRD.md`, `PLAN.md`, `DESIGN.md`, `QUESTIONS.md`,
-  `DEVIATIONS.md`, `orchestration/`) ships in the repo so the work is auditable.
+- **D5** The build trail is auditable in the repository: requirements (`PRD.md`),
+  the frozen contract (`DESIGN.md`) and its change channel (`DEVIATIONS.md`) ship
+  on the default branch, and the development record (`PLAN.md`, `QUESTIONS.md`,
+  `docs/BUILD-LOG.md`, `orchestration/`) is kept on the `dev` branch.
 
 ### 3.5 Licences of referenced work
 
@@ -178,7 +181,7 @@ Every line below must be demonstrated with real output, not asserted:
 | G9 | `docs/` complete; README covers install/use/keys/safety/removal; CHANGELOG present; licence correct | review |
 | G10 | Public GitHub repo `yadav-prakhar/omafan` exists with the pushed tree, GPL-3.0 detected, and a README that a stranger can follow | `gh repo view` |
 | G11 | Publishing inputs prepared in `docs/PUBLISHING.md` (issue body + checklist) | review |
-| G12 | An adversarial review round (independent model, read-only) has been answered: every raised defect is either fixed or recorded as an accepted deviation | `orchestration/REVIEW-*.md` |
+| G12 | An adversarial review round (independent model, read-only) has been answered: every raised defect is either fixed or recorded as an accepted deviation | the review record on the `dev` branch (`orchestration/REVIEW-*.md`) |
 
 ## 5. Risks and mitigations
 
@@ -195,7 +198,7 @@ Every line below must be demonstrated with real output, not asserted:
 
 ## 6. References
 
-- afanctl (sibling repo, installed): `/home/prakhar/Work/tries/2026-09-14-a1708-fanctl`
+- afanctl (sibling repo, installed): https://github.com/yadav-prakhar/afanctl
   (`README.md` = CLI + preset mapping, `DESIGN.md` = contracts, `PRD.md` = the
   full requirement set this plugin consumes).
 - Omarchy plugin development: `https://plugins.omarchy.org/develop.html`;
@@ -206,5 +209,5 @@ Every line below must be demonstrated with real output, not asserted:
   `shell/Ui/{Panel,KeyboardPanel,PanelKeyCatcher,PanelSlider,WidgetButton,BarWidget,PanelActionButton,ButtonGroup,ToggleSwitch}.qml`,
   `shell/Commons/{Style,Color}.qml`, `shell/plugins/panels/monitor/Panel.qml`,
   `/usr/share/omarchy/bin/omarchy-plugin-validate`.
-- Operator's original intent note:
-  `/home/prakhar/Documents/Default/Workspace/omarchy plugin development/omafan/prompt.md`.
+- Operator's original intent note: kept with the project's own working notes (the
+  Obsidian project folder for omafan), not shipped in this repository.

@@ -14,7 +14,7 @@ $ bash tests/run-all.sh
 - [ ] `bash tests/run-all.sh` is green (paste the summary line)
 - [ ] `omarchy plugin validate .` exits 0
 - [ ] `bash -n bin/omafan-ctl bin/omafan-keybindings` is clean
-- [ ] live check done when the UI changed (`orchestration/live-install.sh install`, then `omarchy-restart-shell` if the shell kept stale QML)
+- [ ] live check done when the UI changed (working tree copied into `~/.config/omarchy/plugins/`, then `omarchy-restart-shell` if the shell kept stale QML)
 
 ## Safety checklist
 
@@ -26,7 +26,7 @@ $ bash tests/run-all.sh
 ## Contract and docs
 
 - [ ] `DESIGN.md` is unchanged — **or** a `DEVIATIONS.md` entry is included and the ruling id is in the commit body
-- [ ] Every mirror of a changed constant was updated (docs, README, tests, the local `AGENTS.md`)
+- [ ] Every mirror of a changed constant was updated (docs, README, PRD, tests)
 - [ ] `CHANGELOG.md` has an `Unreleased` entry for user-visible changes
 - [ ] Screenshots in the diff show the current build
 

@@ -74,6 +74,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   corrected (`hw-smoke.sh` is `set -euo pipefail` too), and the
   chord-description mirror trap recorded in `bin/` and `tests/`.
 
+- **Repository layout** — the default branch now ships the plugin, its tests and
+  the operator documentation only. Files whose only purpose is steering a coding
+  agent inside someone else's install are gone from it: the agent notes
+  (`AGENTS.md` at the root, plus `bin/AGENTS.md` and `tests/AGENTS.md`), the task
+  procedures in `skills/`, the build record (`PLAN.md`, `QUESTIONS.md`,
+  `docs/BUILD-LOG.md`, `orchestration/`) and the `orchestration/live-install.sh`
+  orchestrator tool now live on the `dev` branch. `DESIGN.md §9` (the build-era
+  conventions block) is retired with them, the root `README.md` and
+  `CONTRIBUTING.md` document the branch split instead of the removed files, and
+  `DESIGN.md §10` caught up with the gate's eight suites (ruling R11). No runtime
+  file, no privilege surface and no manifest change.
+
 ## [1.0.0] - 2026-09-15
 
 ### Added

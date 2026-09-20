@@ -13,9 +13,8 @@ feature. Read the two rules below before you start — everything else is detail
    any file in this repo. See [docs/SAFETY.md](docs/SAFETY.md).
 2. **`DESIGN.md` is a frozen contract.** Behaviour changes that contradict it
    need an entry in [DEVIATIONS.md](DEVIATIONS.md) *first* (format below), and
-   the design, the docs, the tests and the agent notes must land in the same
-   change. A patch that silently diverges from `DESIGN.md` will be asked to
-   rebase onto a ruling.
+   the design, the docs and the tests must land in the same change. A patch that
+   silently diverges from `DESIGN.md` will be asked to rebase onto a ruling.
 
 ## Development setup
 
@@ -31,18 +30,20 @@ To exercise it in a live Omarchy session, put the working tree into the shell's
 plugin directory (the shell only loads plugins from there):
 
 ```sh
-orchestration/live-install.sh install     # copies the tree, enables, rescans
-orchestration/live-install.sh verify
-orchestration/live-install.sh remove      # back out
+rsync -a --delete --exclude .git ./ \
+  ~/.config/omarchy/plugins/io.github.yadav-prakhar.omafan/
+omarchy-shell shell rescanPlugins
 ```
 
 > [!IMPORTANT]
-> `live-install.sh` touches your **live** `shell.json` — it backs the file up
-> into `orchestration/backups/` (gitignored) first. Editing QML inside
-> `~/.config/omarchy/plugins/` by hand also works; the shell hot-reloads on save,
-> but it can keep stale QML in memory, in which case
+> Enabling a plugin writes your **live** `shell.json` — back that file up first
+> (`cp ~/.config/omarchy/shell.json ~/.config/omarchy/shell.json.bak`). Editing
+> QML inside `~/.config/omarchy/plugins/` by hand also works; the shell
+> hot-reloads on save, but it can keep stale QML in memory, in which case
 > `omarchy-shell shell rescanPlugins` — or, when that is not enough,
-> `omarchy-restart-shell` — is required.
+> `omarchy-restart-shell` — is required. The `dev` branch ships
+> `orchestration/live-install.sh`, which wraps the same recipe with backups,
+> `verify` and `remove`.
 
 Do **not** add symlinks to the plugin tree: `omarchy plugin validate` rejects
 them, and the shell copies the tree on install.
@@ -88,8 +89,9 @@ expectation together rather than editing an assertion to fit.
 | `chore/` | tooling, housekeeping, non-code | `chore/contributing-guide` |
 | `refactor/` | no behaviour change | `refactor/model-guard-split` |
 
-Long-lived or contract-level work may use a ticket id from
-`orchestration/tickets/` as its slug (`feat/T02b-undercooling-guard`).
+Long-lived or contract-level work may use a short slug of its own
+(`feat/undercooling-guard`); the slugs already on record are in
+[CHANGELOG.md](CHANGELOG.md) and the `dev` branch's build record.
 
 ## Commit conventions
 
@@ -124,8 +126,8 @@ Rules that keep the log honest:
 - One logical change per commit; rebase rather than merging `master` in, so the
   history stays linear.
 - Say what you **ran** and what it printed. "Tests pass" is not evidence.
-- Never commit `.recon/`, `orchestration/logs/`, `orchestration/backups/` or
-  `.omo/` — all four are gitignored on purpose.
+- Never commit `.recon/`, `.omo/` or test scratch — they are gitignored on
+  purpose.
 - Version bumps and changelog entries belong in the release commit, not in
   feature commits; use the `Unreleased` section while you work (see
   [CHANGELOG.md](CHANGELOG.md), Keep a Changelog format).
@@ -136,9 +138,8 @@ Rules that keep the log honest:
 1. Write the entry in [DEVIATIONS.md](DEVIATIONS.md) using its own format:
    `D<n> — <item> — old → new — why — affected tickets — ruling`.
 2. Update `DESIGN.md` (the contract) in the same change.
-3. Chase every mirror of the fact: `docs/*`, `README.md`, `CHANGELOG.md`, the
-   `AGENTS.md` notes in the directories you touched, and the tests that assert
-   the old value.
+3. Chase every mirror of the fact: `docs/*`, `README.md`, `PRD.md`,
+   `CHANGELOG.md` and the tests that assert the old value.
 4. Re-run the gate.
 
 The typical failure mode is exactly step 3: a constant that lives in code, in a
@@ -162,14 +163,37 @@ doc table and in a test assertion gets updated in two places out of three.
 - **Docs** — operator language, no marketing. If the UI says `Floor (hardware
   floor)`, the docs say the same and never claim the fan can be stopped.
 
-## Working with an AI agent
+- **Dependencies and runtime** — nothing beyond what is already on the machine:
+  bash, coreutils, `jq`, `awk`/`sed`/`grep`, `procps`, `pkexec`, `notify-send`.
+  No new packages, no network at runtime, no `curl`. Node and `qmllint` are
+  test-time only.
+- **Errors** — every failure prints one human line naming the problem *and* the
+  fix, plus the JSON error object of `DESIGN.md §4.3` for `--json` verbs. Never
+  exit 0 on a failure, never swallow afanctl's stderr.
+- **Style** — 2-space indent in QML/JS, 4 in shell; ~100 columns; no trailing
+  whitespace; files end with a newline; comments explain why, not what; no emoji.
 
-This repo is agent-friendly on purpose: `AGENTS.md` files at the root and in
-`bin/`, `tests/` and `orchestration/` describe the local rules, and
-[`skills/`](skills/) holds task-shaped procedures (running the gates, verifying
-in a live shell, capture recipes, release steps). Point your agent at those
-before it starts editing, and hold it to the same rules as a human patch: real
-evidence, no invented output, no hardware writes in the gate.
+## Development notes live on the `dev` branch
+
+The default branch is what a user installs, so it carries the plugin, its tests
+and the operator documentation only. Everything that exists to *develop* omafan
+is on the [`dev` branch](https://github.com/yadav-prakhar/omafan/tree/dev):
+
+| On `dev` | What it is |
+|---|---|
+| `AGENTS.md`, `bin/AGENTS.md`, `tests/AGENTS.md` | the local invariants for the root, `bin/` and `tests/` |
+| `skills/` | task-shaped procedures: running the gates, verifying in a live shell, changing a frozen contract, capturing screenshots, cutting a release |
+| `PLAN.md`, `QUESTIONS.md`, `docs/BUILD-LOG.md` | the build plan, worker questions and the build audit trail |
+| `orchestration/` | the full build record: tickets, ledger, adversarial reviews, and the `dispatch.sh` / `live-install.sh` tools |
+
+```sh
+git fetch origin dev
+git show dev:AGENTS.md | less
+git show dev:skills/run-the-gates/SKILL.md | less
+```
+
+Contributors — human or agent — are held to the same rules as a human patch:
+real evidence, no invented output, no hardware writes in the gate.
 
 ## Pull requests
 

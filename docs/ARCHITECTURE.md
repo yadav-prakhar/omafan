@@ -197,6 +197,8 @@ so a script that bypasses the panel gets the identical refusal.
 `DESIGN.md` is the frozen contract this architecture implements: §3 (preset
 model), §4 (CLI), §5 (Model.js), §6 (QML), §7 (keybindings), §8 (safety),
 §10 (tests). A change to any of those is proposed in `DEVIATIONS.md`, never
-made silently. The build trail (`PRD.md`, `PLAN.md`, `DESIGN.md`,
-`orchestration/`) ships with the repo so that every decision above can be
-traced to the requirement that produced it.
+made silently. The requirements behind every decision are in `PRD.md`. The build
+record that produced it (`PLAN.md`, `QUESTIONS.md`, `docs/BUILD-LOG.md`,
+`orchestration/`) is kept on the `dev` branch, together with the agent notes and
+the `orchestration/live-install.sh` orchestrator tool — the default branch ships
+the plugin, its tests and this documentation only (ruling R11).

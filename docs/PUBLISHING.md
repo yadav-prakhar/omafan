@@ -106,7 +106,8 @@ The following is the exact text to paste into the
 
 ## 4. Post-submission notes
 
-- The orchestrator does **not** submit the issue; the operator does.
+- Nothing in this repository submits the issue automatically; the repository owner
+  submits it from their own GitHub account.
 - After approval the operator should verify the listing appears at
   `https://plugins.omarchy.org/catalog.json` with the correct description.
 - The `PREVIEW` file (optional `preview.png`) can be uploaded if the marketplace

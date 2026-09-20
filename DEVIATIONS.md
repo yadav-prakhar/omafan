@@ -64,6 +64,32 @@ because these two files were owned by completed tickets:
   overrides, and a fresh state writes normally. Not yet covered by a regression
   case in `tests/ctl.test.sh` (open item, listed in `docs/BUILD-LOG.md`).
 
+- **R11 — the distributed tree is the runtime plus documentation (marketplace
+  review, 2026-09-17).** Old: the repository cloned and installed by users carried
+  development material — root `AGENTS.md` (whose WORK RECORDS block told agents to
+  write into the maintainer's Obsidian vault, outside the plugin), per-directory
+  notes `bin/AGENTS.md` and `tests/AGENTS.md`, `skills/`, the build record
+  (`PLAN.md`, `QUESTIONS.md`, `docs/BUILD-LOG.md`, `orchestration/`) and
+  `DESIGN.md §9`, a conventions block written as a paste-verbatim subagent
+  briefing that named the maintainer's absolute repo path. New: that material
+  lives on the `dev` branch; the default branch ships the plugin, its tests and
+  the operator documentation only. Why: `omarchy plugin add` clones the whole
+  repository into `~/.config/omarchy/plugins/<id>`, so a root agent instruction
+  file is content a stranger's coding agent can discover and act on inside their
+  own installation. Affected: `AGENTS.md` (root, `bin/`, `tests/`), `skills/`,
+  `PLAN.md`, `QUESTIONS.md`, `docs/BUILD-LOG.md`, `orchestration/`, `DESIGN.md`
+  (header, §2 note, §7 provenance line, §9 retired), `PRD.md` (reader line, D5),
+  `README.md`, `CONTRIBUTING.md` (setup, branch slugs, mirror chase, commit rules),
+  `.github/PULL_REQUEST_TEMPLATE.md`, `docs/ARCHITECTURE.md`, `docs/SAFETY.md`,
+  `docs/PUBLISHING.md`. Folded into the same ruling: `DESIGN.md §10`'s suite list
+  caught up with the gate (eight suites, `run-all.sh` records every suite and
+  exits non-zero if any failed), `README.md`'s stale "6 suites" line was
+  corrected, the coding conventions that only lived in §9 (dependencies, error
+  model, style) moved into `CONTRIBUTING.md`, and the sibling-project paths in
+  `docs/SAFETY.md` and `PRD.md` now cite the public afanctl repository instead of
+  the maintainer's local checkout. Ruling: accepted — no runtime file, no
+  privilege surface, no manifest change; the hardware-free gate is unaffected.
+
 - **R10 — In-panel refresh control (T5, 2026-09-17).** Old behaviour
   (`DESIGN.md §6.2`, `Panel.qml`): `poll_mode`/`poll_seconds` could only be
   changed outside the panel — the shell's bar-settings UI,

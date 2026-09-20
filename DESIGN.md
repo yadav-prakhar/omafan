@@ -1,9 +1,10 @@
 # DESIGN.md — omafan frozen contracts
 
-**Status: FROZEN.** Every subagent builds against this document. Do not change a
+**Status: FROZEN.** Every change is built against this document. Do not change a
 public item in this file without a `DEVIATIONS.md` entry (propose old → new →
-why → affected tickets). Written by the orchestrator after first-hand recon on
-2026-09-15 (see `PRD.md` §2 for the verified environment facts).
+why → affected work). Frozen before implementation, after first-hand recon on
+2026-09-15 (`PRD.md` §2 holds the verified environment facts; the build record
+behind this document is on the `dev` branch).
 
 `omafan` is an Omarchy *shell plugin* (Quickshell / Omarchy 4.0.0.alpha
 "Quattro") that gives a pre-T2 Intel Mac (`applesmc`, single fan) **preset and
@@ -61,7 +62,7 @@ slider control of the fan** plus a live readout — by driving the already-insta
 > If the shell rejects an unknown manifest key it is ignored, never fatal; the
 > `validate` gate (`omarchy plugin validate`) must still exit 0.
 
-## 2. File map (fixed — file ownership in `PLAN.md`)
+## 2. File map (fixed)
 
 ```
 manifest.json          plugin manifest (§1)
@@ -410,9 +411,9 @@ close help first (`helpOpen` handler runs before `root.close()`).
 `code:` chords). That analysis is **orchestration-time evidence, not a test**: it
 was performed with `hyprctl binds -j` and a read of the Omarchy + user Lua sources
 during recon (recorded in `PRD.md` §2.7) and re-confirmed live when the block was
-installed (`orchestration/LEDGER.md`). `tests/keybindings.test.sh` is the
-stub-based regression guard for the installer — it does not and cannot consult the
-live compositor (REVIEW-R1 R1-4).
+installed (the install record on the `dev` branch, `orchestration/LEDGER.md`).
+`tests/keybindings.test.sh` is the stub-based regression guard for the installer —
+it does not and cannot consult the live compositor (REVIEW-R1 R1-4).
 
 | Chord | Description | Command |
 |---|---|---|
@@ -478,43 +479,15 @@ Rules:
   (by `omarchy plugin enable`, the shell's own doing) and the managed
   `bindings.lua` block (removable with `bin/omafan-keybindings remove`).
 
-## 9. Conventions block (paste verbatim into every subagent instruction)
-
-```
-CONVENTIONS (omafan, frozen)
-- Repo: /home/prakhar/Work/tries/2026-09-15-omafan. Do NOT run git commands; the
-  orchestrator commits. Do not create or edit files you do not own (see your ticket).
-- Read DESIGN.md before writing code; it is frozen. If you believe it is wrong,
-  stop and write your objection into orchestration/QUESTIONS.md — never silently
-  deviate.
-- Language: shell is POSIX-ish bash (#!/usr/bin/env bash, set -euo pipefail is
-  allowed; quote everything; no bash-isms that break on dash are needed since we
-  require bash). QML targets Quickshell/Omarchy 4.0.0.alpha: import QtQuick,
-  Quickshell, Quickshell.Io, qs.Ui, qs.Commons only. JS in Model.js is ES5-safe,
-  no imports, no I/O, no side effects.
-- Dependencies: none beyond what is present on the machine — bash, coreutils,
-  jq, awk, sed, grep, find, procps, pkexec, notify-send, node (tests only),
-  /usr/lib/qt6/bin/qmllint. No new packages, no network at runtime, no curl.
-- Error model: every failure prints (a) a human line naming the problem AND the
-  fix, (b) for --json verbs, the JSON error object of DESIGN.md §4.3. Never exit 0
-  on a failure. Never swallow stderr from afanctl.
-- Never write to real /sys, /etc, /usr or /run in code paths exercised by tests;
-  tests use fixtures (tests/fixtures/fake-afanctl, --afanctl/--runtime-dir).
-- Comments explain WHY (safety decisions especially), not what. British-neutral
-  English. No emoji. No TODO left in shipped files.
-- Gates you must run and paste the output of: bash -n <each shell file>;
-  node tests/model.test.mjs (if Model.js is yours); tests/qml-lint.sh (if QML is
-  yours); omarchy plugin validate . ; tests/run-all.sh once it exists.
-- Style: 2-space indent in QML/JS, 4 in shell; max ~100 columns; no trailing
-  whitespace; files end with a newline.
-```
-
 ## 10. Test contract
 
 `tests/run-all.sh` runs, in order, every test that must pass without hardware:
-`manifest.test.sh`, `model.test.mjs` (node), `ctl.test.sh` (fake-afanctl),
-`keybindings.test.sh` (tempdir HOME + stub hyprctl), `qml-lint.sh`
-(`/usr/lib/qt6/bin/qmllint -I "$OMARCHY_PATH/shell"`), and `plugin-validate.sh`
-(`omarchy plugin validate .`). Exit non-zero on the first failure, print a final
-`PASS n / FAIL m` line. `tests/integration-shell.sh` and `tests/hw-smoke.sh` are
+`plugin-validate.sh` (`omarchy plugin validate .`), `manifest.test.sh`,
+`model.test.mjs` (node), `ctl.test.sh` (fake-afanctl), `keybindings.test.sh`
+(tempdir HOME + stub hyprctl), `qml-lint.sh` (`/usr/lib/qt6/bin/qmllint -I
+"$OMARCHY_PATH/shell"`), `panel-slider.test.sh` and `panel-refresh.test.sh`
+(structural `Panel.qml` assertions). Each suite records its own failures and runs
+through to its `summarize`; `run-all.sh` prints a final `PASS n / FAIL m` line and
+exits non-zero when any suite failed. `tests/integration-shell.sh` and
+`tests/hw-smoke.sh` are
 **opt-in** (`OMAFAN_LIVE=1`, `OMAFAN_HW=1`) and never run inside `run-all.sh`.

@@ -21,8 +21,8 @@ omafan adds **no** privileged surface of its own:
   `pkexec /usr/bin/afanctl {hold <rpm>|observe}`, and it does so through
   afanctl's **existing, auditable** polkit rule
   `/usr/share/polkit-1/rules.d/49-afanctl.rules`. That rule — part of afanctl's
-  own packaging (`/home/prakhar/Work/tries/2026-09-14-a1708-fanctl/packaging/`,
-  README §Install) — grants exactly
+  own packaging (afanctl's `packaging/` directory, README §Install) — grants
+  exactly
   `status [--json]`, `observe`, `curve` and `hold <integer-rpm>` to members of
   group `wheel` in a local, active session (sibling README §"Plugin surface
   (omafan presets)"). omafan uses only `status`, `hold` and `observe`; it never
@@ -84,10 +84,10 @@ the `AFANCTL_RUNTIME_DIR` environment variable; it never creates or edits
 
 omafan delegates fan ownership to afanctl, so its safety story is only as good
 as afanctl's. The following are afanctl's documented behaviours, quoted or
-paraphrased from the sibling repository
-(`/home/prakhar/Work/tries/2026-09-14-a1708-fanctl/README.md`, §"Safety
-model" and §"Plugin surface (omafan presets)"); afanctl itself is GPL-3.0-only
-and shipped and hardware-verified (sibling README, preamble).
+paraphrased from the afanctl repository
+(https://github.com/yadav-prakhar/afanctl, README §"Safety model" and
+§"Plugin surface (omafan presets)"); afanctl itself is GPL-3.0-only and shipped
+and hardware-verified (afanctl README, preamble).
 
 - **Fail toward the firmware.** "afanctl is built around the principle *fail
   toward the firmware*." Every degradation path ends with the firmware running

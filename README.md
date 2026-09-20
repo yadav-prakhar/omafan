@@ -383,6 +383,7 @@ The full survey, with licences and mechanisms, is in
 | [docs/TESTING.md](docs/TESTING.md) | the hardware-free gate and the opt-in live suites |
 | [docs/PRIOR-ART.md](docs/PRIOR-ART.md) | the sibling survey and the differentiation matrix |
 | [docs/PUBLISHING.md](docs/PUBLISHING.md) | the marketplace submission package |
+| [PRD.md](PRD.md) | requirements, acceptance gate and risks |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | branch naming, commit conventions, the gate, the contract rule |
 | [SECURITY.md](SECURITY.md) | what security means here, and how to report an issue |
 | [CHANGELOG.md](CHANGELOG.md) | release history |
@@ -394,7 +395,7 @@ There is no build step and no package manager — a checkout *is* the plugin. Th
 gate is hardware-free and is the only thing that counts as proof:
 
 ```sh
-bash tests/run-all.sh                 # 6 suites: plugin-validate, manifest, model, ctl, keybindings, qml-lint
+bash tests/run-all.sh                 # 8 suites: plugin-validate, manifest, model, ctl, keybindings, qml-lint, panel-slider, panel-refresh
 bash tests/run-all.sh --list          # the suite names
 omarchy plugin validate .             # the shell's own structural gate
 bash -n bin/omafan-ctl bin/omafan-keybindings
@@ -408,15 +409,18 @@ OMAFAN_LIVE=1 tests/integration-shell.sh   # live shell IPC
 OMAFAN_HW=1   tests/hw-smoke.sh            # moves the fan; attended, asks for a typed yes
 ```
 
-To check UI changes against a running session, install the working tree into the
+To check UI changes against a running session, put the working tree into the
 shell's plugin directory and reload:
 
 ```sh
-orchestration/live-install.sh install   # backs up shell.json, rsyncs, enables, rescans
-orchestration/live-install.sh verify
-orchestration/live-install.sh remove    # back out
-omarchy-restart-shell                   # when the shell keeps stale QML in memory
+rsync -a --delete --exclude .git ./ \
+  ~/.config/omarchy/plugins/io.github.yadav-prakhar.omafan/
+omarchy-shell shell rescanPlugins       # or omarchy-restart-shell for stale QML
 ```
+
+Enabling a plugin writes your live `shell.json`, so back that file up first. The
+`dev` branch carries `orchestration/live-install.sh`, which wraps this recipe
+with its own backup, `verify` and `remove` steps.
 
 `DESIGN.md` is a frozen contract: behaviour changes that contradict it need a
 [DEVIATIONS.md](DEVIATIONS.md) entry first, and the design, docs and tests land
@@ -434,15 +438,24 @@ together.
 - Never write `/sys`, never add privilege, never add a live suite to the gate.
 - Security reports go through [SECURITY.md](SECURITY.md), not a public issue.
 
-### Working with an AI agent
+### Branch layout
 
-The repo carries its own agent notes: [AGENTS.md](AGENTS.md) at the root plus
-per-directory notes in [bin/](bin/AGENTS.md), [tests/](tests/AGENTS.md) and
-[orchestration/](orchestration/AGENTS.md). Task-shaped procedures live in
-[`skills/`](skills/) — running the gate, verifying in a live shell, changing a
-frozen contract, capturing documentation screenshots, cutting a release. Point
-your agent at those before it edits, and hold it to the same rules as a human
-patch: real evidence, no invented output, no hardware writes.
+The default branch is what a user installs, so it holds the plugin, its tests and
+the operator documentation only. Everything that exists to *develop* omafan lives
+on the [`dev` branch](https://github.com/yadav-prakhar/omafan/tree/dev): the agent
+notes (`AGENTS.md` at the root plus per-directory notes in `bin/` and `tests/`),
+the task procedures in `skills/` (running the gate, verifying in a live shell,
+changing a frozen contract, capturing screenshots, cutting a release), the build
+record (`PLAN.md`, `QUESTIONS.md`, `docs/BUILD-LOG.md`, `orchestration/`) and the
+`orchestration/live-install.sh` live-check tool.
+
+```sh
+git fetch origin dev
+git show dev:AGENTS.md | less
+```
+
+Agents and humans are held to the same rules: real evidence, no invented output,
+no hardware writes in the gate (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 ## Licence
 
