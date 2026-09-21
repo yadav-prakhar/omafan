@@ -71,6 +71,42 @@ jobs:
       - name: shell syntax
         run: bash -n bin/omafan-ctl bin/omafan-keybindings
 
+      # A documented precondition of the `ctl` suite, not a workaround for it.
+      # tests/ctl.test.sh's `in_default_runtime` runs `unshare -rm` to bind-mount
+      # a case runtime dir onto /run/afanctl inside a private user+mount
+      # namespace — that is how the suite exercises the default runtime path
+      # without ever touching the real /run/afanctl. It therefore needs
+      # unprivileged user namespaces, which Ubuntu 24.04 restricts by default
+      # (kernel.apparmor_restrict_unprivileged_userns=1). Without them `unshare`
+      # exits 1 and twelve assertions fail with `expected 0, exited 1`, which is
+      # what this workflow's first run reported on a tree that had not touched
+      # the suite at all.
+      #
+      # The suite is correct and is deliberately left alone; the runner is what
+      # has to provide the capability. The closing `unshare -rm true` is a hard
+      # assertion on purpose: an environment that still cannot give us a
+      # namespace must fail the job with this reason, never let the suite run
+      # twelve checks short and report green. Same rule as the two suites this
+      # job cannot host — see the job summary below.
+      #
+      # This step only provisions the capability here and asserts it. Issue #11
+      # owns the rest: stating the requirement in docs/TESTING.md and at
+      # in_default_runtime, making the suite self-diagnose a missing namespace
+      # instead of emitting twelve misleading assertion failures, and deciding
+      # the policy for an environment that genuinely cannot provide one.
+      - name: user namespaces for tests/ctl.test.sh (unshare -rm)
+        run: |
+          set -euo pipefail
+          knob=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [ -e "$knob" ]; then
+            echo "$knob = $(cat "$knob")"
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          else
+            echo "$knob is absent on this runner — nothing to relax"
+          fi
+          unshare -rm true
+          echo "unprivileged user namespaces available"
+
       - name: suites
         run: |
           set -uo pipefail
