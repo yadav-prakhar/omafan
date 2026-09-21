@@ -9,6 +9,12 @@ orchestration/backups/
 # Tool state written into the repo by the agent CLIs used for the build
 .omo/
 
+# Agent operational state (session state, notepads, plans, handoffs). Never
+# committed on any branch, and denied on the shipped branch as well — see
+# tests/lib/shipped-paths.sh and DEVIATIONS.md R13. No leading slash: it also
+# turns up under subdirectories (tests/fixtures/.omc/).
+.omc/
+
 # Test scratch
 /tmp-*/
 *.tmp
