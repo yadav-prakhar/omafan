@@ -87,7 +87,15 @@ omafan_is_dev_path() {
         AGENTS.md | */AGENTS.md) return 0 ;;
         .omc | */.omc | .omc/* | */.omc/*) return 0 ;;
     esac
-    for _sp_deny in $OMAFAN_DEV_PATHS; do
+    # `while read` over a heredoc, never `for x in $LIST`: zsh does not
+    # word-split an unquoted parameter expansion (shwordsplit is off), so the
+    # `for` form silently iterated once over the whole list and reported every
+    # development path as shipped. This machine's interactive shell is zsh, so
+    # that turned a hand-run of the suite into a false pass. Verified in bash,
+    # zsh, dash and /bin/sh. A heredoc does not fork, so `return` still returns
+    # from this function.
+    while IFS= read -r _sp_deny; do
+        [ -n "$_sp_deny" ] || continue
         case "$_sp_deny" in
             */)
                 # A trailing slash means the directory *and* everything under
@@ -108,7 +116,9 @@ omafan_is_dev_path() {
                 fi
                 ;;
         esac
-    done
+    done <<OMAFAN_DEV_LIST
+$OMAFAN_DEV_PATHS
+OMAFAN_DEV_LIST
     return 1
 }
 
@@ -117,7 +127,9 @@ omafan_is_dev_path() {
 # check omafan_is_dev_path first.
 omafan_is_shipped_path() {
     _sp_path="$1"
-    for _sp_allow in $OMAFAN_SHIPPED_PATHS; do
+    # Heredoc, not `for x in $LIST` — see omafan_is_dev_path above.
+    while IFS= read -r _sp_allow; do
+        [ -n "$_sp_allow" ] || continue
         case "$_sp_allow" in
             */)
                 # Bare form as well as everything under it, for the same reason
@@ -135,7 +147,9 @@ omafan_is_shipped_path() {
                 fi
                 ;;
         esac
-    done
+    done <<OMAFAN_SHIPPED_LIST
+$OMAFAN_SHIPPED_PATHS
+OMAFAN_SHIPPED_LIST
     return 1
 }
 

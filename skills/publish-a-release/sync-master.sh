@@ -88,6 +88,15 @@ shipped="$OMAFAN_SHIPPED_BRANCH"
 [ "$do_commit" = 1 ] || [ -z "$tag" ] || die 2 \
     "--tag needs --commit" "there is no commit to tag in a review run"
 
+# The tag is validated here, before any worktree exists and long before the
+# commit: it used to be checked after committing, so a duplicate tag left an
+# untagged release commit behind and the re-run reported "already in sync" and
+# never tagged anything.
+if [ -n "$tag" ] && git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null 2>&1; then
+    die 2 "tag $tag already exists" \
+        "pick the next version, or delete it:  git tag -d $tag"
+fi
+
 git rev-parse --verify --quiet "$from" >/dev/null 2>&1 || die 2 \
     "no such ref: $from" "fetch it:  git fetch origin $from"
 git rev-parse --verify --quiet "refs/heads/$shipped" >/dev/null 2>&1 || die 1 \
@@ -120,6 +129,8 @@ printf '  worktree: %s\n\n' "$worktree"
 # Each entry is replaced outright rather than merged, so a file deleted on the
 # source ref disappears from the shipped branch instead of lingering.
 missing=""
+# `for entry in $LIST` is safe here because this script is bash (the lists
+# library uses a heredoc loop instead, because zsh does not word-split).
 for entry in $OMAFAN_SHIPPED_PATHS; do
     case "$entry" in
         "" | . | .. | /* | */../* | *..)
@@ -128,7 +139,21 @@ for entry in $OMAFAN_SHIPPED_PATHS; do
             ;;
     esac
     rm -rf -- "${worktree:?}/${entry%/}"
-    if [ -z "$(git ls-tree -r --name-only "$from" -- "$entry")" ]; then
+    # Captured in the current shell, never inside `[ -z "$(...)" ]`: a failing
+    # git call there read as "absent from the source ref" and the entry was
+    # *removed* from the shipped branch. Injecting a broken `git ls-tree`
+    # deleted every allowlisted path — the whole plugin — and only the
+    # manifest.json check further down happened to notice.
+    #
+    # `die` also cannot live in a command substitution: it would exit the
+    # subshell and the loop would carry on. That is why this is an `if !`
+    # assignment and not a helper function returning through `$(...)`.
+    if ! entry_paths="$(git ls-tree -r --name-only "$from" -- "$entry")"; then
+        die 1 "cannot list $entry on $from" \
+            "the source ref may be corrupt or partial" \
+            "refusing to treat an unreadable path as absent and delete it"
+    fi
+    if [ -z "$entry_paths" ]; then
         missing="$missing $entry"
         continue
     fi
@@ -167,15 +192,29 @@ if [ -n "$symlinks" ]; then
         "replace the link with a real file on $from, or deny what it points at"
 fi
 
+# The listing is captured first, and a failed or empty traversal is fatal. It
+# used to be a command substitution inside the heredoc, whose exit status is
+# discarded: if `find`/`ls-files` failed, the loop body simply never ran and the
+# denylist was never applied — fail-open, and invisible.
+if ! staged_paths="$(git -C "$worktree" ls-files)"; then
+    die 1 "cannot list the staged tree in $worktree" \
+        "refusing to prune a tree this script cannot read"
+fi
+if [ -z "$staged_paths" ]; then
+    die 1 "the staged tree is empty after copying the allowlist" \
+        "expected the shipped paths from $from; check OMAFAN_SHIPPED_PATHS"
+fi
+
 pruned=0
 while IFS= read -r file; do
+    [ -n "$file" ] || continue
     if omafan_is_dev_path "$file"; then
         rm -rf -- "$worktree/$file"
         printf 'pruned (development material): %s\n' "$file"
         pruned=$((pruned + 1))
     fi
 done <<EOF
-$(git -C "$worktree" ls-files)
+$staged_paths
 EOF
 [ "$pruned" -eq 0 ] || printf '\n'
 
@@ -209,6 +248,10 @@ fi
 # Paths already tracked on the shipped branch that are neither copied nor
 # denied. They survive; naming them keeps that an explicit decision rather than
 # an accident (`.gitignore` is the one in the tree today).
+if ! final_paths="$(git -C "$worktree" ls-files)"; then
+    die 1 "cannot list the synced tree in $worktree" \
+        "refusing to report a tree this script cannot read"
+fi
 carried=""
 while IFS= read -r file; do
     [ -n "$file" ] || continue
@@ -216,7 +259,7 @@ while IFS= read -r file; do
         carried="$carried $file"
     fi
 done <<EOF
-$(git -C "$worktree" ls-files)
+$final_paths
 EOF
 if [ -n "$carried" ]; then
     printf 'carried over untouched (outside the allowlist, not denied):%s\n\n' "$carried"
@@ -265,9 +308,11 @@ new_sha="$(git -C "$worktree" rev-parse --short HEAD)"
 printf 'committed %s on %s\n' "$new_sha" "$shipped"
 
 if [ -n "$tag" ]; then
+    # Re-checked: the run is not instantaneous and the early check is the one
+    # that protects the commit.
     if git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null 2>&1; then
-        die 1 "tag $tag already exists" \
-            "pick the next version, or delete it:  git tag -d $tag"
+        die 1 "tag $tag appeared during this run" \
+            "the commit stands; tag it by hand or pick the next version"
     fi
     git -C "$worktree" tag -a "$tag" -m "omafan $tag"
     printf 'tagged %s at %s\n' "$tag" "$new_sha"

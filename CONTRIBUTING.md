@@ -236,28 +236,40 @@ git show dev:skills/run-the-gates/SKILL.md | less
 git show dev:worknotes/README.md | less
 ```
 
-Install the guard once per clone — as a **copy**, not via `core.hooksPath`:
+Install the guards once per clone — **both hooks**, as copies, not via
+`core.hooksPath`:
 
 ```sh
-cp .githooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+for h in pre-commit pre-merge-commit guard.sh; do
+    cp .githooks/$h .git/hooks/$h && chmod +x .git/hooks/$h
+done
 ```
 
 `git config core.hooksPath .githooks` looks tidier and is what this repo used to
 document, but it goes inert exactly where it matters: `.githooks/` is
 development material, so checking out `master` removes the directory and git then
-finds no hook to run. `.git/` belongs to no branch, so a copy there survives the
-switch — re-copy it when `.githooks/pre-commit` changes.
+finds no hook to run. `.git/` belongs to no branch, so copies there survive the
+switch — re-copy them when `.githooks/` changes.
 
-The hook refuses a commit on `master` — the branch *name*, not "the default
-branch", which is now `dev` and carries this material on purpose — that touches
-development material, and fails closed on `master` if it cannot read
-`tests/lib/shipped-paths.sh`. On `dev` and on feature branches it does nothing.
+`pre-commit` refuses a commit on `master` — the branch *name*, not "the default
+branch", which is now `dev` and carries this material on purpose — that adds or
+changes development material. `pre-merge-commit` refuses a merge onto `master`
+whose resulting tree contains any, and it is **not** optional: git never runs
+`pre-commit` for a merge commit, so without it `git merge dev` onto `master`
+succeeds and lands every denylisted path. Both fail closed on `master` if they
+cannot read `tests/lib/shipped-paths.sh`. On `dev` and on feature branches they
+do nothing.
 
-Two more checks back it up, because a copied hook can go stale, be skipped or
-never be installed: the `branch-model` gate suite reads the tree of `master` and
-names every offender, and `.github/workflows/ci.yml` runs that suite on every PR,
-where it cannot be skipped. The cost is not theoretical: users install this
-repository by cloning it.
+> [!IMPORTANT]
+> **The hooks are a convenience, not the guarantee.** They cannot see a
+> fast-forward merge at all — it creates no commit, so git runs no hook —
+> `--no-verify` skips them, a copy in `.git/hooks/` goes stale when
+> `.githooks/` changes, and a fresh clone has none until someone runs the loop
+> above. The guarantee is the `branch-model` gate suite, which reads the tree of
+> `master` and names every offender, and `.github/workflows/ci.yml`, which runs
+> that suite on every PR where it cannot be skipped. If you are deciding what to
+> trust, trust those two. The cost is not theoretical: users install this
+> repository by cloning it.
 
 ## Cutting a release
 

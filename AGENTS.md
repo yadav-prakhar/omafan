@@ -21,15 +21,28 @@
 > `tests/AGENTS.md`, `docs/agents/`, `skills/`, `worknotes/`, `PLAN.md`,
 > `QUESTIONS.md`, `orchestration/`, `.githooks/` — is development material and is
 > denied on `master`. Both lists live in one place, `tests/lib/shipped-paths.sh`,
-> read by the sync script, `.githooks/pre-commit` (which refuses a commit on
-> `master` — the branch *name*, not "the default branch"), the `branch-model`
-> gate suite and CI. Install the hook as a **copy**, not via `core.hooksPath`:
-> `.githooks/` is denied on `master`, so checking `master` out removes the
-> directory and git then runs no hook, while `.git/` belongs to no branch.
+> read by the sync script, the two git hooks, the `branch-model` gate suite and
+> CI.
+>
+> **The guarantee is the gate suite and CI, not the hooks.** `tests/branch-model.test.sh`
+> reads the tree of `master` and names every offender, and
+> `.github/workflows/ci.yml` runs it where it cannot be skipped. The hooks catch
+> the mistake earlier and locally, and they are genuinely partial: a
+> fast-forward merge creates no commit so **no hook runs at all**, `--no-verify`
+> skips them, a copy in `.git/hooks/` goes stale, and a fresh clone has none
+> until someone installs them. Install both, as copies — `.githooks/` is denied
+> on `master`, so checking `master` out removes the directory and
+> `core.hooksPath` then finds nothing, while `.git/` belongs to no branch:
 >
 > ```sh
-> cp .githooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+> for h in pre-commit pre-merge-commit guard.sh; do
+>     cp .githooks/$h .git/hooks/$h && chmod +x .git/hooks/$h
+> done
 > ```
+>
+> `pre-merge-commit` is not optional: git never runs `pre-commit` for a merge
+> commit, so without it `git merge dev` onto `master` succeeds and lands every
+> denylisted path.
 >
 > Rulings: R11 (the guarantee), R12, R13 (this mechanism) in `DEVIATIONS.md`.
 > The conventions block `DESIGN.md §9` used to carry is retired with the rest;
@@ -60,7 +73,7 @@ daemon; never touches `/sys` itself.
 │   └── agents/        # dev-only: issue tracker, triage labels, domain layout
 ├── skills/            # task-shaped procedures for agents (run-the-gates, live-verify-*)
 ├── worknotes/         # the development record: one folder per piece of work
-├── .githooks/         # pre-commit guard: dev-only paths never reach `master`
+├── .githooks/         # pre-commit + pre-merge-commit guards (+ shared guard.sh)
 ├── .github/           # PR template + issue templates + workflows/ci.yml (the gate)
 ├── orchestration/     # build-era record: tickets, ledger, reviews, BUILD-LOG.md
 ├── DESIGN.md          # FROZEN contract; changes need DEVIATIONS.md ruling

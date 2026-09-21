@@ -1,0 +1,36 @@
+#!/bin/sh
+# Refuse to merge development material onto the shipped branch.
+#
+# Git runs `pre-merge-commit` for a merge that creates a commit — `pre-commit`
+# is never called for one, so without this file `git merge dev` onto `master`
+# exited 0 and put every AGENTS.md, worknotes/, orchestration/ and skills/ path
+# into the shipped tree. That is exactly the plain merge R13 exists to replace
+# with a curated sync.
+#
+# Still not the guarantee, and less of one than pre-commit: a fast-forward merge
+# creates no commit, so NO hook runs at all, and `--no-verify` skips this one
+# too. `tests/branch-model.test.sh` in the gate and in CI is the guarantee.
+#
+# This checks the whole resulting tree rather than a staged delta: importing in
+# bulk is what a merge does, so "what will this commit contain" is the question.
+#
+# INSTALL and bypass: see .githooks/pre-commit.
+set -u
+
+[ "${OMAFAN_ALLOW_DEV_PATHS:-0}" = "1" ] && exit 0
+
+branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo "")
+# The literal shipped-branch name, for the same reason as in pre-commit, and
+# asserted against tests/lib/shipped-paths.sh by tests/branch-model.test.sh.
+[ "$branch" = "master" ] || exit 0
+
+guard="$(dirname "$0")/guard.sh"
+if [ ! -r "$guard" ]; then
+    printf 'pre-merge-commit: cannot read %s — refusing to guess on %s.\n' "$guard" "$branch" >&2
+    printf '  re-install the hooks, or: OMAFAN_ALLOW_DEV_PATHS=1 git merge ...\n' >&2
+    exit 1
+fi
+# shellcheck source=.githooks/guard.sh
+. "$guard"
+
+omafan_guard pre-merge-commit tree

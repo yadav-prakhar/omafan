@@ -149,17 +149,35 @@ assert_eq "no" "$(omafan_is_shipped_path "PLAN.md" && echo yes || echo no)" \
 # can read this library, so the branch name appears there as a literal too. That
 # is the only copy, and this is the assertion that keeps it honest. The hook is
 # development material, so on the shipped branch there is nothing to check.
-hook=".githooks/pre-commit"
-if [ -r "$hook" ]; then
+# Both hooks, not just pre-commit: git runs pre-merge-commit — never
+# pre-commit — for a merge that creates a commit, so without that file a plain
+# `git merge dev` onto the shipped branch exited 0 and landed every denylisted
+# path. The pair must exist and must agree on the branch name.
+for hook in .githooks/pre-commit .githooks/pre-merge-commit; do
+    if [ ! -r "$hook" ]; then
+        # Development material: absent on the shipped branch, nothing to check.
+        [ -d .githooks ] && {
+            _HARNESS_FAIL=$((_HARNESS_FAIL + 1))
+            printf 'FAIL: %s is missing; git would run no guard for that event\n' "$hook" >&2
+        }
+        continue
+    fi
     assert_eq "1" \
         "$(grep -c "^\[ \"\$branch\" = \"$OMAFAN_SHIPPED_BRANCH\" \] || exit 0\$" "$hook")" \
         "$hook keys on the literal branch name $OMAFAN_SHIPPED_BRANCH"
     # And never on "the default branch", which is now the integration branch.
     assert_eq "0" "$(grep -c 'symbolic-ref.*refs/remotes/origin/HEAD' "$hook")" \
         "$hook does not resolve the default branch"
-fi
+done
 
 # --- 3. the shipped branch's tree ---------------------------------------------
+# checks_ran counts the tree inspections that actually happened. If none did,
+# this suite asserted nothing about any shipped tree and must NOT report
+# success: run-all.sh captures stderr and shows it only on failure, so a
+# SKIPPED notice printed here used to reach the operator as `RUN branch-model
+# PASS` in a clone with no master ref. A check that had nothing to check is a
+# failure with a fix line, not a pass.
+checks_ran=0
 shipped_ref=""
 if git rev-parse --git-dir >/dev/null 2>&1; then
     for candidate in \
@@ -175,6 +193,7 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
 fi
 
 if [ -n "$shipped_ref" ]; then
+    checks_ran=$((checks_ran + 1))
     tree="$(git ls-tree -r --name-only "$shipped_ref")"
     assert_clean "$shipped_ref" "$tree"
     # No symlinks, ever. `omarchy plugin validate` rejects them
@@ -195,10 +214,9 @@ if [ -n "$shipped_ref" ]; then
         "$shipped_ref" "$(printf '%s\n' "$tree" | grep -c .)" \
         "$(git rev-parse --short "$shipped_ref")"
 else
-    printf 'branch-model: SKIPPED the tree check — no %s ref in this clone.\n' \
-        "$OMAFAN_SHIPPED_BRANCH" >&2
-    printf '  fetch it:  git fetch origin %s:refs/remotes/origin/%s\n' \
-        "$OMAFAN_SHIPPED_BRANCH" "$OMAFAN_SHIPPED_BRANCH" >&2
+    # stdout as well as stderr: run-all.sh swallows stderr on a passing suite.
+    printf 'branch-model: no %s ref in this clone — the tree check did not run.\n' \
+        "$OMAFAN_SHIPPED_BRANCH"
 fi
 
 # --- 4. this working tree, when it is a shipped tree --------------------------
@@ -206,13 +224,28 @@ fi
 # installed plugin directory, which the shell copies without git metadata.
 head_branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo "")"
 if [ "$head_branch" = "$OMAFAN_SHIPPED_BRANCH" ]; then
+    checks_ran=$((checks_ran + 1))
     assert_clean "the working tree (HEAD on $OMAFAN_SHIPPED_BRANCH)" \
         "$(git ls-files)"
     printf 'branch-model: checked the working tree (HEAD on %s)\n' "$head_branch"
 elif ! git rev-parse --git-dir >/dev/null 2>&1; then
+    checks_ran=$((checks_ran + 1))
+    # An installed plugin directory: the shell copies the tree without .git, so
+    # there is no ref to read and the tree in front of us is the shipped one.
     assert_clean "this installed tree" \
-        "$(find . -type f -not -path './.git/*' | sed 's|^\./||')"
+        "$(find . -not -path './.git' -not -path './.git/*' \
+            \( -type f -o -type l \) | sed 's|^\./||')"
     printf 'branch-model: checked this installed tree (no git metadata)\n'
+fi
+
+# --- 5. did anything actually get checked? ------------------------------------
+if [ "$checks_ran" -eq 0 ]; then
+    _HARNESS_FAIL=$((_HARNESS_FAIL + 1))
+    printf 'FAIL: this suite inspected no shipped tree, so it proved nothing.\n' >&2
+    printf '       no %s ref, and HEAD is not %s.\n' \
+        "$OMAFAN_SHIPPED_BRANCH" "$OMAFAN_SHIPPED_BRANCH" >&2
+    printf '       fetch it:  git fetch origin %s:refs/remotes/origin/%s\n' \
+        "$OMAFAN_SHIPPED_BRANCH" "$OMAFAN_SHIPPED_BRANCH" >&2
 fi
 
 summarize
