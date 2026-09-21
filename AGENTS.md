@@ -1,16 +1,37 @@
 # PROJECT KNOWLEDGE BASE — `dev` branch
 
-> **This branch is the development record; `master` is the shipped plugin.**
-> `omarchy plugin add` clones the whole repository into a user's
-> `~/.config/omarchy/plugins/<id>`, so the default branch carries the QML,
-> `Model.js`, `bin/`, `tests/`, `PRD.md` and `docs/` only. Everything that exists
-> *only* here — this file, `bin/AGENTS.md`, `tests/AGENTS.md`, `skills/`,
-> `worknotes/`, `PLAN.md`, `QUESTIONS.md`, `orchestration/`, `.githooks/` — is
-> development material: never merge it into `master` (rulings R11 and R12 in
-> `DEVIATIONS.md`; `.githooks/pre-commit` refuses a commit on the default branch
-> that touches those paths, once `git config core.hooksPath .githooks` is set).
-> Syncing is one-way, after runtime commits land on `master`:
-> `git checkout dev && git merge --ff-only master`.
+> **`dev` is the integration branch and the default branch; `master` is the
+> shipped plugin.** Feature branches `<type>/<slug>` cut from `dev` and merge
+> into `dev`, which carries everything: runtime, operator docs and development
+> material. Work lands here, never on `master`.
+>
+> **`master` is never merged into.** `omarchy plugin add` clones the whole
+> repository into a user's `~/.config/omarchy/plugins/<id>`, so a root
+> `AGENTS.md` on the shipped branch is content a stranger's coding agent can
+> discover and act on inside their own installation — a prompt-injection surface,
+> not untidiness. A release is therefore a **curated sync**: only the shipped
+> path allowlist is copied from `dev` onto `master`, as one commit, then tagged.
+>
+> ```sh
+> skills/publish-a-release/sync-master.sh --from dev            # review the diff
+> skills/publish-a-release/sync-master.sh --from dev --commit    # then write it
+> ```
+>
+> Everything that exists *only* here — this file, `bin/AGENTS.md`,
+> `tests/AGENTS.md`, `docs/agents/`, `skills/`, `worknotes/`, `PLAN.md`,
+> `QUESTIONS.md`, `orchestration/`, `.githooks/` — is development material and is
+> denied on `master`. Both lists live in one place, `tests/lib/shipped-paths.sh`,
+> read by the sync script, `.githooks/pre-commit` (which refuses a commit on
+> `master` — the branch *name*, not "the default branch"), the `branch-model`
+> gate suite and CI. Install the hook as a **copy**, not via `core.hooksPath`:
+> `.githooks/` is denied on `master`, so checking `master` out removes the
+> directory and git then runs no hook, while `.git/` belongs to no branch.
+>
+> ```sh
+> cp .githooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+> ```
+>
+> Rulings: R11 (the guarantee), R12, R13 (this mechanism) in `DEVIATIONS.md`.
 > The conventions block `DESIGN.md §9` used to carry is retired with the rest;
 > its technical rules now live in `CONTRIBUTING.md` §"Code conventions".
 
@@ -36,10 +57,11 @@ daemon; never touches `/sys` itself.
 ├── bin/               # omafan-ctl (sole afanctl interface) + keybindings installer
 ├── tests/             # hardware-free gate (bash harness + fixtures)
 ├── docs/              # operator docs (ARCHITECTURE, SAFETY, TESTING, ...) + docs/images/
+│   └── agents/        # dev-only: issue tracker, triage labels, domain layout
 ├── skills/            # task-shaped procedures for agents (run-the-gates, live-verify-*)
 ├── worknotes/         # the development record: one folder per piece of work
-├── .githooks/         # pre-commit guard: dev-only paths never reach the default branch
-├── .github/           # PR template + issue templates (no CI workflows)
+├── .githooks/         # pre-commit guard: dev-only paths never reach `master`
+├── .github/           # PR template + issue templates + workflows/ci.yml (the gate)
 ├── orchestration/     # build-era record: tickets, ledger, reviews, BUILD-LOG.md
 ├── DESIGN.md          # FROZEN contract; changes need DEVIATIONS.md ruling
 ├── CONTRIBUTING.md    # branch naming, commit conventions, gates, PR flow
@@ -58,10 +80,11 @@ the current build) and `docs/images/*` (bar widget, `?` overlay).
 | Pure logic | `Model.js` | preset ladder, `parseStatus`, undercooling guard |
 | CLI verbs/exit codes | `bin/omafan-ctl` | reads never pkexec; writes via `pkexec afanctl hold\|observe` |
 | Global chords | `bin/omafan-keybindings` | managed block in `~/.config/hypr/bindings.lua` |
-| Test gate | `tests/run-all.sh` | 6 suites; all hardware-free |
+| Test gate | `tests/run-all.sh` | 9 suites; all hardware-free |
 | Data flow/failure modes | `docs/ARCHITECTURE.md` | daemon-first diagram |
-| Contract | `DESIGN.md` + `DEVIATIONS.md` | 8 deviation rulings (R1–R8) |
-| How to contribute | `CONTRIBUTING.md` | branches `<type>/<slug>`, Conventional Commits with a scope |
+| Contract | `DESIGN.md` + `DEVIATIONS.md` | 13 deviation rulings (R1–R13) |
+| How to contribute | `CONTRIBUTING.md` | branches `<type>/<slug>` off `dev`, Conventional Commits with a scope |
+| Branch model / release | `tests/lib/shipped-paths.sh`, `skills/publish-a-release/` | the shipped/denied path lists and the curated sync (R13) |
 | Task procedures for agents | `skills/<name>/SKILL.md` | gates, live verify, frozen-contract change, screenshots, release |
 | Development record | `worknotes/INDEX.md` | one folder per piece of work; inside: `PLAN.md`, `LOG.md`, `REVIEW.md`, `SUMMARY.md` |
 | The build record | `orchestration/` | frozen: tickets, `LEDGER.md`, `BUILD-LOG.md`, reviews, dispatch tools |
@@ -152,7 +175,7 @@ No LSP/codegraph coverage for QML+bash (centrality unmeasured; from reads).
 
 ## COMMANDS
 ```bash
-tests/run-all.sh                          # full hardware-free gate (8 suites)
+tests/run-all.sh                          # full hardware-free gate (9 suites)
 bash tests/qml-lint.sh                    # QML lint (qmllint + qs.* shim)
 bash -n bin/omafan-ctl bin/omafan-keybindings  # shell syntax
 omarchy plugin validate .                 # shell's structural gate
@@ -167,8 +190,11 @@ OMAFAN_HW=1 tests/hw-smoke.sh             # opt-in hardware (interactive yes)
 - `status` exits 5 with `daemon.running:false` when down — read the doc, not
   just the code. `doctor` names the fix per FAIL line.
 - `orchestration/logs|backups`, `.recon/`, `.omo/` gitignored — ignore them.
-- No CI workflows, Makefile, or package.json exist in this repo. `.github/`
-  holds only the PR template and the issue templates.
+- No Makefile or package.json exists in this repo. `.github/` holds the PR
+  template, the issue templates and `workflows/ci.yml` — the gate plus the
+  branch-model guard, which runs on PRs to `dev` and `master` (R13). Two suites
+  are deliberately not run there (`plugin-validate` needs the `omarchy` CLI,
+  `qml-lint` needs `qmllint`); the workflow says so in its job summary.
 
 ## Agent skills
 

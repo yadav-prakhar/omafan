@@ -5,7 +5,7 @@ description: Use when you need to know whether an omafan change actually works, 
 
 # Run the gates
 
-The gate is eight hardware-free suites. It is the only thing that counts as proof
+The gate is nine hardware-free suites. It is the only thing that counts as proof
 in this repo: "it looks right" is not evidence, and neither is a suite you did
 not run.
 
@@ -13,7 +13,7 @@ not run.
 
 ```sh
 bash tests/run-all.sh          # PASS suites n / FAIL suites m / SKIP k
-bash tests/run-all.sh --list   # plugin-validate manifest.test.sh model.test.mjs ctl.test.sh keybindings.test.sh qml-lint.sh panel-slider.test.sh panel-refresh.test.sh
+bash tests/run-all.sh --list   # plugin-validate manifest.test.sh model.test.mjs ctl.test.sh keybindings.test.sh qml-lint.sh panel-slider.test.sh panel-refresh.test.sh branch-model.test.sh
 ```
 
 A single suite, while iterating:
@@ -26,6 +26,7 @@ bash tests/keybindings.test.sh   # keybinding block via a stub hyprctl
 bash tests/qml-lint.sh           # QML lint through a shim import root
 bash tests/panel-slider.test.sh  # Panel.qml slider Auto-reset guards (structural)
 bash tests/panel-refresh.test.sh # Panel.qml REFRESH row (structural)
+bash tests/branch-model.test.sh  # master carries no development material (R13)
 bash tests/plugin-validate.sh    # omarchy plugin validate .
 bash -n bin/omafan-ctl bin/omafan-keybindings    # shell syntax
 omarchy plugin validate .                        # the shell's own structural gate
@@ -79,7 +80,7 @@ A green run that lives only in a terminal is a claim. Paste it into the feature'
 
 ```text
 $ bash tests/run-all.sh
-PASS suites 8 / FAIL suites 0 / SKIP 0
+PASS suites 9 / FAIL suites 0 / SKIP 0
 ```
 
 Keep the note current as you work and close the folder with a `SUMMARY.md` when

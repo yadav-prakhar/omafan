@@ -56,7 +56,7 @@ running, `jq`, and Node only if you want to run the `Model.js` suite.
 Every change must pass the hardware-free gate:
 
 ```sh
-bash tests/run-all.sh                     # 8 suites: plugin-validate, manifest, model, ctl, keybindings, qml-lint, panel-slider, panel-refresh
+bash tests/run-all.sh                     # 9 suites: plugin-validate, manifest, model, ctl, keybindings, qml-lint, panel-slider, panel-refresh, branch-model
 bash tests/run-all.sh --list              # the suite names
 bash tests/qml-lint.sh                    # QML lint (SKIPs cleanly without qmllint/shell tree)
 bash -n bin/omafan-ctl bin/omafan-keybindings
@@ -76,9 +76,43 @@ network, or require root, a daemon or a compositor. Fixtures pin the daemon
 contract; when the contract changes, update the fixture, `fake-afanctl` and the
 expectation together rather than editing an assertion to fit.
 
+## Branch model
+
+`dev` is the integration branch and the default branch. `master` is the shipped
+branch — what `omarchy plugin add` clones into a user's machine.
+
+```
+feature branch  ->  dev  ->  (curated sync at release)  ->  master
+```
+
+- **Cut every branch from `dev`, and open every PR against `dev`.** It is the
+  default, so a new PR targets it already.
+- **`master` is never merged into.** A release copies an allowlist of shipped
+  paths from `dev` onto `master` as one commit, then tags it — see
+  [Cutting a release](#cutting-a-release).
+- `dev` carries everything: runtime, operator documentation *and* development
+  material. `master` carries the plugin, its tests and the operator docs only.
+
+Why a sync and not a merge: `omarchy plugin add` clones the **whole repository**
+into `~/.config/omarchy/plugins/<id>`, so a root `AGENTS.md` on the shipped
+branch is content a stranger's coding agent can discover and act on inside their
+own installation. That is a prompt-injection surface, not untidiness
+([DEVIATIONS.md](DEVIATIONS.md) R11, mechanism replaced by R13). A plain
+`git merge dev` would put `worknotes/`, `orchestration/`, `skills/`, `PLAN.md`
+and every `AGENTS.md` into every user's install.
+
+> [!NOTE]
+> The sibling project [`afanctl`](https://github.com/yadav-prakhar/afanctl) has
+> **no equivalent constraint** — nothing clones it into a user's config
+> directory, so there `dev` → `master` at release is an ordinary `git merge`.
+> The two repositories share the same *branch flow* and have different *release
+> mechanics*. Do not carry this repository's sync over to that one, and do not
+> carry that one's merge over to here.
+
 ## Branch naming
 
-`<type>/<short-slug>`, lower-case, hyphenated, one topic per branch:
+`<type>/<short-slug>`, lower-case, hyphenated, one topic per branch, cut from
+`dev`:
 
 | Type | Use for | Example |
 |---|---|---|
@@ -123,15 +157,17 @@ pre-rename string, so the gate failed on a clean tree.
 
 Rules that keep the log honest:
 
-- One logical change per commit; rebase rather than merging `master` in, so the
-  history stays linear.
+- One logical change per commit; rebase onto `dev` rather than merging it in, so
+  the history stays linear.
 - Say what you **ran** and what it printed. "Tests pass" is not evidence.
 - Record the work in `worknotes/` as it happens: the feature folder's `LOG.md`
   carries the command output and `SUMMARY.md` closes it. A commit body summarises
   that evidence; it is not the place the evidence lives.
-- Never commit `.recon/`, `.omo/` or test scratch — they are gitignored on
-  purpose. Development material never reaches the default branch (`worknotes/`,
-  `skills/`, `orchestration/`, the `AGENTS.md` files, `PLAN.md`, `QUESTIONS.md`).
+- Never commit `.recon/`, `.omo/`, `.omc/` or test scratch — they are gitignored
+  on purpose. Development material never reaches the **shipped** branch
+  (`worknotes/`, `skills/`, `orchestration/`, `docs/agents/`, the `AGENTS.md`
+  files, `PLAN.md`, `QUESTIONS.md`); the full lists are in
+  `tests/lib/shipped-paths.sh` and the `branch-model` gate suite asserts them.
 - Version bumps and changelog entries belong in the release commit, not in
   feature commits; use the `Unreleased` section while you work (see
   [CHANGELOG.md](CHANGELOG.md), Keep a Changelog format).
@@ -179,9 +215,9 @@ doc table and in a test assertion gets updated in two places out of three.
 
 ## Development notes live on the `dev` branch
 
-The default branch is what a user installs, so it carries the plugin, its tests
-and the operator documentation only. Everything that exists to *develop* omafan
-is on the [`dev` branch](https://github.com/yadav-prakhar/omafan/tree/dev):
+`master` is what a user installs, so it carries the plugin, its tests and the
+operator documentation only. Everything that exists to *develop* omafan is on
+`dev`, the default branch:
 
 | On `dev` | What it is |
 |---|---|
@@ -189,7 +225,9 @@ is on the [`dev` branch](https://github.com/yadav-prakhar/omafan/tree/dev):
 | `skills/` | task-shaped procedures: running the gates, verifying in a live shell, changing a frozen contract, capturing screenshots, cutting a release |
 | `worknotes/` | the development record for everything after the build: one folder per piece of work, holding `PLAN.md`, `LOG.md`, `REVIEW.md` and `SUMMARY.md` |
 | `PLAN.md`, `QUESTIONS.md`, `orchestration/` | the build-era record: plan, worker questions, ticket cards, ledger, adversarial reviews, `BUILD-LOG.md`, and the `dispatch.sh` / `live-install.sh` tools |
-| `.githooks/pre-commit` | refuses a commit on the default branch that touches any path in this table |
+| `docs/agents/` | dev-only notes on the issue tracker, the triage labels and the domain doc layout |
+| `.githooks/pre-commit` | refuses a commit on `master` that touches any path in this table |
+| `tests/lib/shipped-paths.sh` | the one home of both path lists (shipped on `master` too, because the gate suite reads it there) |
 
 ```sh
 git fetch origin dev
@@ -198,15 +236,47 @@ git show dev:skills/run-the-gates/SKILL.md | less
 git show dev:worknotes/README.md | less
 ```
 
-If you work on `dev`, enable the guard once per clone:
+Install the guard once per clone — as a **copy**, not via `core.hooksPath`:
 
 ```sh
-git config core.hooksPath .githooks
+cp .githooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
 ```
 
-It refuses a commit on the default branch that touches development material.
-There is no CI to catch that otherwise, and the cost is not theoretical: users
-install this repository by cloning it.
+`git config core.hooksPath .githooks` looks tidier and is what this repo used to
+document, but it goes inert exactly where it matters: `.githooks/` is
+development material, so checking out `master` removes the directory and git then
+finds no hook to run. `.git/` belongs to no branch, so a copy there survives the
+switch — re-copy it when `.githooks/pre-commit` changes.
+
+The hook refuses a commit on `master` — the branch *name*, not "the default
+branch", which is now `dev` and carries this material on purpose — that touches
+development material, and fails closed on `master` if it cannot read
+`tests/lib/shipped-paths.sh`. On `dev` and on feature branches it does nothing.
+
+Two more checks back it up, because a copied hook can go stale, be skipped or
+never be installed: the `branch-model` gate suite reads the tree of `master` and
+names every offender, and `.github/workflows/ci.yml` runs that suite on every PR,
+where it cannot be skipped. The cost is not theoretical: users install this
+repository by cloning it.
+
+## Cutting a release
+
+A release is a curated sync, never a merge:
+
+```sh
+skills/publish-a-release/sync-master.sh --from dev              # review the diff
+skills/publish-a-release/sync-master.sh --from dev --full-diff   # the whole diff
+skills/publish-a-release/sync-master.sh --from dev --commit --tag vX.Y.Z
+```
+
+The script copies the shipped path allowlist into a throwaway worktree on
+`master`, prunes every denylisted path the allowlist swept up (`bin/AGENTS.md`,
+`tests/AGENTS.md` and `docs/agents/` all sit inside allowlisted directories),
+**refuses to write if any denylisted path survives**, and prints the diff. Nothing
+is written without `--commit`, and running it twice changes nothing. The version
+bump, the changelog move and the marketplace steps are in
+[`skills/publish-a-release/SKILL.md`](skills/publish-a-release/SKILL.md) and
+[docs/PUBLISHING.md](docs/PUBLISHING.md).
 
 Contributors — human or agent — are held to the same rules as a human patch:
 real evidence, no invented output, no hardware writes in the gate.
