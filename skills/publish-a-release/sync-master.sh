@@ -143,6 +143,30 @@ fi
 # bin/AGENTS.md, tests/AGENTS.md and docs/agents/ all sit *inside* allowlisted
 # directories, so the denylist is a filter over what was copied and not merely
 # the complement of the allowlist.
+#
+# The traversal is `git ls-files` over the staged tree, not `find`: it is exactly
+# the set of paths that will be committed. `find . -type f` was wrong twice over
+# — it does not match a symlink, so a symlink named `docs/agents` was never
+# offered to the matcher at all, and it describes the disk rather than the index.
+git -C "$worktree" add -A
+
+# A symlink is refused outright, before anything is pruned. The shipped tree must
+# contain none: `omarchy plugin validate` rejects them, `tests/manifest.test.sh`
+# asserts their absence, and AGENTS.md lists them as an anti-pattern. A symlink
+# is also the way round the denylist — `docs/agents -> agents-src` makes
+# `docs/agents/inject.md` resolve on a user's machine out of files that are
+# individually innocent — so this fails closed and makes a human look, rather
+# than pruning the link and shipping whatever it pointed at.
+symlinks="$(git -C "$worktree" ls-files -s | awk '$1 == "120000" { $1=$2=$3=""; sub(/^[ \t]+/, ""); print }')"
+if [ -n "$symlinks" ]; then
+    printf 'sync-master: refusing to write a symlink to %s\n\n' "$shipped" >&2
+    printf '%s\n' "$symlinks" | sed 's/^/  /' >&2
+    die 1 "the shipped tree must contain no symlinks" \
+        "omarchy plugin validate rejects them, and a symlink can point a denied" \
+        "path at content that ships (DEVIATIONS.md R11, R13)" \
+        "replace the link with a real file on $from, or deny what it points at"
+fi
+
 pruned=0
 while IFS= read -r file; do
     if omafan_is_dev_path "$file"; then
@@ -151,7 +175,7 @@ while IFS= read -r file; do
         pruned=$((pruned + 1))
     fi
 done <<EOF
-$(cd "$worktree" && find . -type f -not -path './.git/*' | sed 's|^\./||' | sort)
+$(git -C "$worktree" ls-files)
 EOF
 [ "$pruned" -eq 0 ] || printf '\n'
 
@@ -160,7 +184,13 @@ git -C "$worktree" add -A
 # --- refuse if any development path survived ----------------------------------
 # The prune above should make this impossible; it is asserted anyway, because a
 # silent hole here ships agent instructions to every user (R11).
-offenders="$(git -C "$worktree" diff --cached --name-only | omafan_dev_paths_in)"
+#
+# `git ls-files` again, deliberately, and never `git diff --cached`: the diff
+# lists *deletions* too, so every path the prune successfully removed came back
+# as an offender and the script refused to repair a `master` that a plain merge
+# had already poisoned — the one job it exists for. The question here is "what
+# does the tree about to be committed contain", not "what changed".
+offenders="$(git -C "$worktree" ls-files | omafan_dev_paths_in)"
 if [ -n "$offenders" ]; then
     printf 'sync-master: refusing to write development material to %s\n\n' "$shipped" >&2
     printf '%s\n' "$offenders" | sed 's/^/  /' >&2

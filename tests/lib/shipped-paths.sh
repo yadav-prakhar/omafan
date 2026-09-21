@@ -85,11 +85,19 @@ omafan_is_dev_path() {
     # say — before it ships, instead of after someone updates the list.
     case "$_sp_path" in
         AGENTS.md | */AGENTS.md) return 0 ;;
-        .omc/* | */.omc/*) return 0 ;;
+        .omc | */.omc | .omc/* | */.omc/*) return 0 ;;
     esac
     for _sp_deny in $OMAFAN_DEV_PATHS; do
         case "$_sp_deny" in
             */)
+                # A trailing slash means the directory *and* everything under
+                # it. The bare form has to match too: git records a symlink
+                # named `docs/agents` as a path with no trailing slash, so
+                # matching only `docs/agents/*` let a symlink of that name
+                # through while the files behind it shipped.
+                if [ "$_sp_path" = "${_sp_deny%/}" ]; then
+                    return 0
+                fi
                 case "$_sp_path" in
                     "$_sp_deny"*) return 0 ;;
                 esac
@@ -112,6 +120,11 @@ omafan_is_shipped_path() {
     for _sp_allow in $OMAFAN_SHIPPED_PATHS; do
         case "$_sp_allow" in
             */)
+                # Bare form as well as everything under it, for the same reason
+                # as omafan_is_dev_path above.
+                if [ "$_sp_path" = "${_sp_allow%/}" ]; then
+                    return 0
+                fi
                 case "$_sp_path" in
                     "$_sp_allow"*) return 0 ;;
                 esac

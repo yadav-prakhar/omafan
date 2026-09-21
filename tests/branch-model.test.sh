@@ -89,6 +89,19 @@ assert_dev_path ".omc/state/session.json"
 assert_dev_path "tests/fixtures/.omc/scratch"
 # An AGENTS.md that nobody has added yet is still caught (the basename rule).
 assert_dev_path "docs/AGENTS.md"
+# The bare form of every trailing-slash entry, not just what is under it. git
+# records a symlink named `docs/agents` as a path with no trailing slash, so a
+# matcher that only knew `docs/agents/*` let the link through while the files
+# behind it shipped — `docs/agents -> agents-src` plus a real
+# `docs/agents-src/inject.md` synced with no refusal at all.
+assert_dev_path "docs/agents"
+assert_dev_path "worknotes"
+assert_dev_path "orchestration"
+assert_dev_path "skills"
+assert_dev_path ".githooks"
+assert_dev_path ".recon"
+assert_dev_path ".omc"
+assert_dev_path "tests/fixtures/.omc"
 
 # Shipped runtime and operator docs must not trip the matcher, or a release
 # would copy nothing.
@@ -164,6 +177,20 @@ fi
 if [ -n "$shipped_ref" ]; then
     tree="$(git ls-tree -r --name-only "$shipped_ref")"
     assert_clean "$shipped_ref" "$tree"
+    # No symlinks, ever. `omarchy plugin validate` rejects them
+    # (tests/manifest.test.sh asserts the same for the working tree), and a
+    # symlink is the way round the denylist: a link named after a denied
+    # directory makes denied-looking paths resolve out of files that are
+    # individually innocent. The release sync refuses to write one; this is the
+    # assertion that one never arrived by another route.
+    links="$(git ls-tree -r "$shipped_ref" | awk '$1 == "120000" { $1=$2=$3=""; sub(/^[ \t]+/, ""); print }')"
+    if [ -z "$links" ]; then
+        _HARNESS_PASS=$((_HARNESS_PASS + 1))
+    else
+        _HARNESS_FAIL=$((_HARNESS_FAIL + 1))
+        printf 'FAIL: %s contains symlinks:\n' "$shipped_ref" >&2
+        printf '%s\n' "$links" | sed 's/^/       /' >&2
+    fi
     printf 'branch-model: checked %s (%s paths, %s)\n' \
         "$shipped_ref" "$(printf '%s\n' "$tree" | grep -c .)" \
         "$(git rev-parse --short "$shipped_ref")"
