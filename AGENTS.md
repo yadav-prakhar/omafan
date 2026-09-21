@@ -170,3 +170,17 @@ OMAFAN_HW=1 tests/hw-smoke.sh             # opt-in hardware (interactive yes)
 - No CI workflows, Makefile, or package.json exist in this repo. `.github/`
   holds only the PR template and the issue templates.
 
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in GitHub Issues (yadav-prakhar/omafan), via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default label vocabulary (needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout (CONTEXT.md + docs/adr/ at repo root; neither exists yet). See `docs/agents/domain.md`.
+
