@@ -83,8 +83,10 @@ jobs:
       # the suite at all.
       #
       # The suite is correct and is deliberately left alone; the runner is what
-      # has to provide the capability. The closing `unshare -rm true` is a hard
-      # assertion on purpose: an environment that still cannot give us a
+      # has to provide the capability. The closing probe is a hard assertion on
+      # purpose, and it exercises the namespace AND the bind mount, because
+      # provisioning only the namespace moves the failure from `exit 1` to
+      # `exit 90` rather than fixing it: an environment that still cannot give us a
       # namespace must fail the job with this reason, never let the suite run
       # twelve checks short and report green. Same rule as the two suites this
       # job cannot host — see the job summary below.
@@ -94,7 +96,7 @@ jobs:
       # in_default_runtime, making the suite self-diagnose a missing namespace
       # instead of emitting twelve misleading assertion failures, and deciding
       # the policy for an environment that genuinely cannot provide one.
-      - name: user namespaces for tests/ctl.test.sh (unshare -rm)
+      - name: runtime dir and user namespaces for tests/ctl.test.sh
         run: |
           set -euo pipefail
           knob=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
@@ -104,8 +106,17 @@ jobs:
           else
             echo "$knob is absent on this runner — nothing to relax"
           fi
-          unshare -rm true
-          echo "unprivileged user namespaces available"
+          # `mount --bind` needs the target to exist, and a fresh runner has
+          # never run afanctl, so its documented default runtime dir is absent.
+          # Without this the namespace is created and the bind then fails,
+          # which the suite reports as `exit 90` rather than `exit 1`.
+          sudo mkdir -p /run/afanctl
+          # Assert the whole capability the suite needs, not just half of it:
+          # a namespace AND a bind mount onto that dir. `unshare -rm true`
+          # alone passes while the bind still fails.
+          probe="$(mktemp -d)"
+          unshare -rm bash -c 'mount --bind "$1" /run/afanctl || exit 90' _ "$probe"
+          echo "user namespaces and /run/afanctl bind mount available"
 
       - name: suites
         run: |
