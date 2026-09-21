@@ -102,7 +102,16 @@ because these two files were owned by completed tickets:
   literal branch name `master`**, not on "the default branch": the default branch
   is now `dev`, the branch that carries this material on purpose, so a guard
   keyed on the default would refuse every normal commit — the single most likely
-  way to get this change wrong. Why: the guarantee R11 exists to protect is
+  way to get this change wrong. It checks the branch *before* it requires the
+  lists, so a branch that predates them is never blocked, and fails closed only
+  on `master`. Its install instruction changed with it: a **copy** into
+  `.git/hooks/pre-commit`, because `git config core.hooksPath .githooks` — what
+  R12 documented — goes inert exactly where it matters. `.githooks/` is denied on
+  `master`, so checking `master` out removes the directory and git finds no hook
+  to run; `.git/` belongs to no branch. Verified in a scratch clone: on `master`
+  a staged `AGENTS.md` is refused, a shipped-only change commits, and a deleted
+  list file refuses rather than guesses; on `dev` and on a feature branch the
+  same staged development paths commit normally. Why: the guarantee R11 exists to protect is
   unchanged and is *not* tidiness — `omarchy plugin add` clones the whole
   repository into a user's `~/.config/omarchy/plugins/<id>`, so a root
   `AGENTS.md` on the shipped branch is content a stranger's coding agent can

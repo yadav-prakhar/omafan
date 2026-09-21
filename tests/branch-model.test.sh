@@ -16,9 +16,10 @@
 #
 # What it inspects, in this order:
 #   1. the matcher in tests/lib/shipped-paths.sh (so a mis-edited list is caught)
-#   2. the tree of the shipped branch, from $OMAFAN_SHIPPED_REF or the first
+#   2. the one fact .githooks/pre-commit has to duplicate: the branch name
+#   3. the tree of the shipped branch, from $OMAFAN_SHIPPED_REF or the first
 #      resolvable of refs/heads/master and refs/remotes/origin/master
-#   3. this working tree, when it *is* a shipped tree (HEAD on the shipped
+#   4. this working tree, when it *is* a shipped tree (HEAD on the shipped
 #      branch, or an installed copy with no git metadata at all)
 #
 # With no shipped ref resolvable — a shallow, single-branch clone of `dev` — the
@@ -130,7 +131,22 @@ assert_eq "no" "$(omafan_is_shipped_path "worknotes/INDEX.md" && echo yes || ech
 assert_eq "no" "$(omafan_is_shipped_path "PLAN.md" && echo yes || echo no)" \
     "PLAN.md is outside the allowlist"
 
-# --- 2. the shipped branch's tree ---------------------------------------------
+# --- 2. the hook's one duplicated fact ----------------------------------------
+# .githooks/pre-commit must decide whether it is on the shipped branch before it
+# can read this library, so the branch name appears there as a literal too. That
+# is the only copy, and this is the assertion that keeps it honest. The hook is
+# development material, so on the shipped branch there is nothing to check.
+hook=".githooks/pre-commit"
+if [ -r "$hook" ]; then
+    assert_eq "1" \
+        "$(grep -c "^\[ \"\$branch\" = \"$OMAFAN_SHIPPED_BRANCH\" \] || exit 0\$" "$hook")" \
+        "$hook keys on the literal branch name $OMAFAN_SHIPPED_BRANCH"
+    # And never on "the default branch", which is now the integration branch.
+    assert_eq "0" "$(grep -c 'symbolic-ref.*refs/remotes/origin/HEAD' "$hook")" \
+        "$hook does not resolve the default branch"
+fi
+
+# --- 3. the shipped branch's tree ---------------------------------------------
 shipped_ref=""
 if git rev-parse --git-dir >/dev/null 2>&1; then
     for candidate in \
@@ -158,7 +174,7 @@ else
         "$OMAFAN_SHIPPED_BRANCH" "$OMAFAN_SHIPPED_BRANCH" >&2
 fi
 
-# --- 3. this working tree, when it is a shipped tree --------------------------
+# --- 4. this working tree, when it is a shipped tree --------------------------
 # Two shapes reach a user: a clone with HEAD on the shipped branch, and the
 # installed plugin directory, which the shell copies without git metadata.
 head_branch="$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo "")"
