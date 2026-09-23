@@ -12,6 +12,7 @@ What belongs here and what does not: [README.md](README.md).
 | In-panel refresh row — Auto/Custom + stepper (R10) | [2026-09-17-in-panel-refresh](2026-09-17-in-panel-refresh/SUMMARY.md) | done | 2026-09-17 | 2026-09-17 |
 | The development record moves into the repository (R12) | [2026-09-20-in-repo-worknotes](2026-09-20-in-repo-worknotes/SUMMARY.md) | done | 2026-09-20 | 2026-09-20 |
 | `dev` as integration branch, filtered release to `master` (R13, issue #2) | [2026-09-21-branch-model](2026-09-21-branch-model/SUMMARY.md) | done | 2026-09-21 | 2026-09-21 |
+| Schema negotiation instead of string equality (R14, issue #4) | [2026-09-24-schema-negotiation](2026-09-24-schema-negotiation/SUMMARY.md) | active | 2026-09-24 | 2026-09-24 |
 
 The roadmap — what is done and what is next — is [BACKLOG.md](BACKLOG.md).
 
