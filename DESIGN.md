@@ -207,6 +207,13 @@ never changes the exit code.
   non-zero exit from `status` is not a parse failure. Exit 5 remains the only
   outcome of a **write** verb when the daemon is unavailable (with the §4.3 error
   object and no write attempted).
+- **Schema negotiation (R14, 2026-09-24):** the afanctl `status` and `state`
+  documents are matched by family and version (`<family>.v<major>`), not by
+  string equality. The highest version both sides understand is used; a newer
+  unknown version renders every recognised field and adds one `warnings[]`
+  notice; an older, missing or malformed version is refused naming the fix. A
+  newer daemon that still advertises an understood version is re-asked for it
+  (`afanctl status --json --schema <id>`). `omafan.status.v1` is unchanged.
 
 ### 4.2 JSON: `omafan.presets.v1`
 

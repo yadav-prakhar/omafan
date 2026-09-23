@@ -101,7 +101,10 @@ There are four reasons, in order of importance.
    document whose fields (and degradation latches) are afanctl's business.
    `omafan-ctl status --json` publishes `omafan.status.v1`: only the fields the
    UI needs, in the shape `Model.js` parses. The UI is insulated from afanctl's
-   schema evolution.
+   schema evolution. Since ruling R14 the CLI negotiates afanctl's schema by
+   family and version instead of matching it by string equality: a newer
+   document renders its recognised fields with one warning, and a daemon that
+   still advertises a version the plugin understands is re-asked for it.
 4. **One place for the failure model.** Exit codes 0–8, the human "problem +
    fix" line on stderr, the JSON error envelope on stdout, and the
    `status`-exits-5-with-a-document rule all live in `omafan-ctl`. The panel's

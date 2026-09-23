@@ -9,6 +9,7 @@ bin/ is the sole afanctl interface: `omafan-ctl` (daemon verbs, JSON, writes via
 | Reads: status/presets/doctor | `omafan-ctl` `run_status`/`run_doctor` | never pkexec; status still emits a doc when the daemon is down |
 | Writes: preset/cycle/rpm/release | `omafan-ctl` | `write_prereqs` refuses degraded/stale/absent before any runner call |
 | Undercooling guard | `omafan-ctl` `assert_undercooling` | hot (t_eff_c >= 80) + hold below current -> refuse; `--force` / `--force-undercooling` overrides |
+| Schema negotiation | `omafan-ctl` `schema_check` + `query_afanctl_status` + `read_state` | family+version, newest mutual, newer degrades with one warning, older refuses (R14); `Model.js` holds the pure rule |
 | hw band + poll-interval cache | `omafan-ctl` `load_limits` | `$XDG_RUNTIME_DIR/omafan/hw.json` (fallback `/tmp/omafan-<uid>/`), TTL 24 h |
 | Chord block | `omafan-keybindings` | between `-- BEGIN omafan` / `-- END omafan` in `~/.config/hypr/bindings.lua`, `o.bind(chord, desc, cmd)` form |
 | Conflict detection | `omafan-keybindings` `live_conflicts`/`lua_chord_conflicts` | live `hyprctl binds -j` (modmask 72) + Omarchy default Lua tree + user hypr dir |

@@ -4,6 +4,38 @@ Every entry: `D<n> — <item> — old → new — why — affected tickets — r
 
 ## Rulings made by the orchestrator (frozen items changed, tickets amended before dispatch)
 
+- **R14 — schema negotiation replaces string equality (issue #4, 2026-09-24).**
+  Old: `bin/omafan-ctl` refused any afanctl document whose `.schema` was not
+  literally `afanctl.status.v1`, `Model.js` refused any omafan document whose
+  `.schema` was not literally `omafan.status.v1`, and `read_state` refused any
+  state file whose `.schema` was not literally `afanctl.state.v1` — so a version
+  bump on either side was a hard failure, and afanctl's contract v2
+  (afanctl#8) was blocked behind it. New: a schema id is parsed as
+  `<family>.v<major>`; the consumer accepts the **highest version both sides
+  understand** (`Model.js`: pure `parseSchemaId`/`selectSchema`, pinned by
+  `tests/model.test.mjs`; the CLI mirrors the same rule in one `schema_check`
+  helper used by the status read, the state read and the doctor probe — no
+  second ad-hoc comparison). An unknown **newer** version degrades gracefully:
+  every recognised field renders, unknown fields are ignored, and exactly one
+  `warnings[]` notice says the daemon is newer than the plugin — never a blank
+  panel, never a hard error. An unknown **older**, missing or malformed version
+  is refused: the CLI prints the fix and returns 1 (write verbs then refuse with
+  their existing `limits_unavailable` exit 1), and `parseStatus` returns
+  `{ok:false, error}`. A newer daemon that still advertises an understood
+  version is re-asked for it (`status --json --schema afanctl.status.v1`); a
+  failed re-request falls back to the emitted document. Why: the shared contract
+  must be able to evolve without breaking every installed plugin; the change is
+  tolerance, not a bump. `omafan.status.v1` is emitted byte-for-byte unchanged
+  and the R6 read/write split (`status` always renders a document) is preserved.
+  Affected: `Model.js`, `bin/omafan-ctl`, `tests/fixtures/fake-afanctl`
+  (`FAKE_AFANCTL_SCHEMA` switch + `--schema`), `tests/model.test.mjs`,
+  `tests/ctl.test.sh`, `DESIGN.md §4.1`, `AGENTS.md`, `tests/AGENTS.md`,
+  `CHANGELOG.md` Unreleased. Ruling: accepted — no runtime file outside the
+  plugin, no privilege surface, no manifest change, no new exit code.
+  Deliberately not done here: teaching omafan to *use* the v2 `fans`/`control`
+  shape (the adaptive control widget, a separate epic item) — this only stops a
+  v2 daemon from breaking a v1 plugin.
+
 - **R1 — preset model gained an undercooling guard.** `DESIGN.md §3` said presets
   are holds derived from the hardware band; live testing found the machine at
   97 °C with the firmware already at 4794 rpm, where `off`/`low`/`med` command

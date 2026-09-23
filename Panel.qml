@@ -32,6 +32,10 @@ Panel {
   // back untouched so scripts see exactly what the CLI printed.
   property string rawStatusText: ""
   property string lastError: ""
+  // omafan#4: the single quiet line shown when the daemon or the document is a
+  // newer schema than this plugin understands. Set from a successful parse;
+  // empty when everything is understood.
+  property string schemaNotice: ""
   property bool busy: false
   property var pendingRpm: null
   // T2: true after a release-type write (preset auto / release verb) is SENT
@@ -154,6 +158,7 @@ Panel {
       var warning = Model.undercoolingWarning(root.statusDoc, target)
       if (warning) return warning
     }
+    if (root.schemaNotice !== "") return root.schemaNotice
     return ""
   }
 
@@ -438,6 +443,12 @@ Panel {
       root.status = parsed.status
       root.statusStale = false
       root.lastError = ""
+      // The one quiet line for a newer schema (omafan#4): either the document
+      // itself is newer than the panel understands, or the CLI flagged the
+      // daemon's schema in warnings[]. Never a blank panel, never a hard error.
+      root.schemaNotice = parsed.notice
+        ? String(parsed.notice)
+        : (Model.statusNotice(parsed.status) || "")
       // T2: a release is confirmed only by a fresh status reporting hold
       // inactive (hold.active derives from daemon mode == "hold", DESIGN
       // §4.1) — never by a bare write exit 0. On confirmation the queued

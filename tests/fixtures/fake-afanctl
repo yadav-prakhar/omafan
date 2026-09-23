@@ -10,6 +10,8 @@
 # Environment switches
 #   AFANCTL_RUNTIME_DIR  runtime directory (--runtime-dir overrides it)
 #   FAKE_AFANCTL_MODE    observe (default) | hold | monitor-only | absent | error
+#   FAKE_AFANCTL_SCHEMA  v1 (default) | v1-supported | v2-newer | v2-compat |
+#                        v0-older | v0-compat | missing | malformed
 #   AFANCTL_FAKE_FAIL=1  every write (hold/observe/curve) exits 1
 #
 # FAKE_AFANCTL_MODE selects the daemon state `status` reports:
@@ -19,9 +21,24 @@
 #   absent        no daemon (running:false)   (status-observe.json, state gone)
 #   error         every verb exits 1 with a runtime failure
 #
+# FAKE_AFANCTL_SCHEMA selects the schema `status` reports, independently of the
+# daemon state (omafan#4's negotiation matrix):
+#   v1            afanctl.status.v1, no schema_supported  (today's daemon)
+#   v1-supported  v1 plus schema_supported [v1, v2]       (older-but-supported)
+#   v2-newer      v2 (v1 fields plus unknown ones), advertises v2 only
+#   v2-compat     v2 (restructured fans[]), advertises [v1, v2]; a
+#                 `--schema afanctl.status.v1` request returns the v1 fixture
+#   v0-older      afanctl.status.v0, advertises v0 only
+#   v0-compat     afanctl.status.v0 default that also advertises v1; a
+#                 `--schema afanctl.status.v1` request returns the v1 fixture
+#   missing       the v1 document with .schema deleted
+#   malformed     .schema = "afanctl.status" (no version)
+#
 # Writes append their effective argv to "$runtime_dir/argv.log" and write an
 # afanctl.cmd.v1 document to "$runtime_dir/cmd.json" (atomic tmp+rename), which
-# mirrors the real CLI and lets tests assert exactly what was requested.
+# mirrors the real CLI and lets tests assert exactly what was requested. Reads
+# append their argv to "$runtime_dir/status-argv.log" so a negotiated
+# `status --schema <id>` re-request is visible.
 
 set -euo pipefail
 
@@ -33,6 +50,7 @@ readonly AFANCTL_VERSION="afanctl 0.1.0"
 
 runtime_dir="${AFANCTL_RUNTIME_DIR:-}"
 mode="${FAKE_AFANCTL_MODE:-observe}"
+schema_mode="${FAKE_AFANCTL_SCHEMA:-v1}"
 
 usage() {
     cat >&2 <<'EOF'
@@ -73,6 +91,13 @@ validate_mode() {
     esac
 }
 
+validate_schema() {
+    case "$schema_mode" in
+        v1 | v1-supported | v2-newer | v2-compat | v0-older | v0-compat | missing | malformed) ;;
+        *) usage_error "unknown FAKE_AFANCTL_SCHEMA: $schema_mode" ;;
+    esac
+}
+
 # Refuse to run without an explicit runtime dir, and never operate on the live
 # daemon's directory or any system path. Tests must pass a tempdir.
 require_runtime_dir() {
@@ -88,10 +113,11 @@ require_runtime_dir() {
     esac
 }
 
-# Print an afanctl.status.v1 snapshot for the selected FAKE_AFANCTL_MODE. The
-# monitor-only and absent documents are derived with jq so the fixture set stays
-# small and every derived field stays consistent with its base fixture.
-status_json() {
+# Print the base afanctl.status.v1 snapshot for the selected FAKE_AFANCTL_MODE.
+# The monitor-only and absent documents are derived with jq so the fixture set
+# stays small and every derived field stays consistent with its base fixture.
+# The schema switch (status_json) transforms this base.
+base_status_json() {
     case "$mode" in
         observe)
             cat -- "$script_dir/status-observe.json" ;;
@@ -113,6 +139,87 @@ status_json() {
     esac
 }
 
+# Apply FAKE_AFANCTL_SCHEMA to the base document. $1 is a requested schema id
+# (empty = the mode's default); a request the mode does not advertise is a usage
+# error, matching the real CLI's exit 2. v2-newer is additive (v1 fields plus
+# unknown ones); v2-compat is the restructured v2 shape and answers a v1 request
+# with the v1 fixture, which is what the negotiated re-request exercises.
+status_json() {
+    local requested="${1:-}" base
+    base="$(base_status_json)"
+    case "$schema_mode" in
+        v1)
+            if [ -n "$requested" ] && [ "$requested" != "afanctl.status.v1" ]; then
+                usage_error "schema $requested is not advertised by FAKE_AFANCTL_SCHEMA=v1"
+            fi
+            printf '%s\n' "$base" ;;
+        v1-supported)
+            if [ -n "$requested" ] && [ "$requested" != "afanctl.status.v1" ]; then
+                usage_error "schema $requested is not advertised by FAKE_AFANCTL_SCHEMA=v1-supported"
+            fi
+            printf '%s\n' "$base" \
+                | jq -c '.schema_supported = ["afanctl.status.v1","afanctl.status.v2"]' ;;
+        v2-newer)
+            if [ -n "$requested" ] && [ "$requested" != "afanctl.status.v2" ]; then
+                usage_error "schema $requested is not advertised by FAKE_AFANCTL_SCHEMA=v2-newer"
+            fi
+            printf '%s\n' "$base" | jq -c '
+                .schema = "afanctl.status.v2"
+                | .schema_supported = ["afanctl.status.v2"]
+                | .backend = {kind: "applesmc", abi: "modern", kernel_min: "7.3"}
+                | .safety = {l1_reassert: true, l2_death_path: true, hardware_watchdog: null}
+                | .future = {unknown: true}' ;;
+        v2-compat)
+            case "$requested" in
+                "" | "afanctl.status.v2")
+                    printf '%s\n' "$base" | jq -c '
+                        . as $v1
+                        | {schema: "afanctl.status.v2",
+                           schema_supported: ["afanctl.status.v1","afanctl.status.v2"],
+                           backend: {kind: "applesmc", abi: "legacy", kernel_min: "7.2"},
+                           daemon: $v1.daemon,
+                           safety: {l1_reassert: true, l2_death_path: true},
+                           fans: [{id: "applesmc:fan1", label: "Exhaust",
+                                   control: {kind: "rpm_target", min: $v1.fan.min_rpm, max: $v1.fan.max_rpm},
+                                   readable_rpm: true, verify: "tolerance:50",
+                                   rpm: $v1.fan.rpm, target: $v1.fan.target_rpm, owned: $v1.fan.manual}],
+                           sensors: $v1.sensors, effective: $v1.effective,
+                           recent_errors: $v1.recent_errors}' ;;
+                "afanctl.status.v1")
+                    printf '%s\n' "$base" ;;
+                *)
+                    usage_error "schema $requested is not advertised by FAKE_AFANCTL_SCHEMA=v2-compat" ;;
+            esac ;;
+        v0-older)
+            if [ -n "$requested" ] && [ "$requested" != "afanctl.status.v0" ]; then
+                usage_error "schema $requested is not advertised by FAKE_AFANCTL_SCHEMA=v0-older"
+            fi
+            printf '%s\n' "$base" \
+                | jq -c '.schema = "afanctl.status.v0" | .schema_supported = ["afanctl.status.v0"]' ;;
+        v0-compat)
+            case "$requested" in
+                "" | "afanctl.status.v0")
+                    printf '%s\n' "$base" | jq -c '
+                        .schema = "afanctl.status.v0"
+                        | .schema_supported = ["afanctl.status.v0","afanctl.status.v1"]' ;;
+                "afanctl.status.v1")
+                    printf '%s\n' "$base" ;;
+                *)
+                    usage_error "schema $requested is not advertised by FAKE_AFANCTL_SCHEMA=v0-compat" ;;
+            esac ;;
+        missing)
+            if [ -n "$requested" ]; then
+                usage_error "schema $requested is not advertised by FAKE_AFANCTL_SCHEMA=missing"
+            fi
+            printf '%s\n' "$base" | jq -c 'del(.schema)' ;;
+        malformed)
+            if [ -n "$requested" ]; then
+                usage_error "schema $requested is not advertised by FAKE_AFANCTL_SCHEMA=malformed"
+            fi
+            printf '%s\n' "$base" | jq -c '.schema = "afanctl.status"' ;;
+    esac
+}
+
 # Human status summary mirroring the real CLI's one-fact-per-line shape.
 status_human() {
     status_json | jq -r '
@@ -128,18 +235,32 @@ status_human() {
 }
 
 cmd_status() {
-    local json=0 arg
-    for arg in "$@"; do
+    # Log the read argv so a negotiated `status --schema <id>` re-request is
+    # visible to tests (writes already log to argv.log).
+    printf '%s\n' "$*" >>"$runtime_dir/status-argv.log"
+    local json=0 requested="" arg
+    while [ "$#" -gt 0 ]; do
+        arg="$1"
         case "$arg" in
-            --json) json=1 ;;
-            *) usage_error "unknown flag for status: $arg" ;;
+            --json)
+                json=1
+                shift ;;
+            --schema)
+                [ "$#" -ge 2 ] || usage_error "missing value for --schema"
+                requested="$2"
+                shift 2 ;;
+            --schema=*)
+                requested="${arg#*=}"
+                shift ;;
+            *)
+                usage_error "unknown flag for status: $arg" ;;
         esac
     done
     if [ "$mode" = "error" ]; then
         runtime_error "afanctl: sysfs read failed: /sys/devices/platform/applesmc.768/fan1_input: No such file or directory"
     fi
     if [ "$json" -eq 1 ]; then
-        status_json
+        status_json "$requested"
     else
         status_human
     fi
@@ -232,6 +353,13 @@ while [ "$#" -gt 0 ]; do
         --json)
             positional+=("--json")
             shift ;;
+        --schema)
+            [ "$#" -ge 2 ] || usage_error "missing value for --schema"
+            positional+=("--schema" "$2")
+            shift 2 ;;
+        --schema=*)
+            positional+=("--schema" "${1#*=}")
+            shift ;;
         --* | -*)
             usage_error "unknown flag \`$1'" ;;
         *)
@@ -248,6 +376,7 @@ verb="$1"
 shift
 
 validate_mode
+validate_schema
 
 case "$verb" in
     status)

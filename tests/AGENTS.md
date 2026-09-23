@@ -29,13 +29,15 @@ branch-model is the one suite asserting a repository property rather than plugin
 ### fixtures/
 | File | Role |
 |---|---|
-| fake-afanctl | Executable afanctl stand-in (`status`, `hold`, `observe`/`curve`, `--version`). Refuses to run without a caller runtime dir; refuses /run/afanctl, /sys, /etc, /usr. Writes argv to `$RUN/argv.log`, cmd doc to `$RUN/cmd.json` |
+| fake-afanctl | Executable afanctl stand-in (`status [--json] [--schema <id>]`, `hold`, `observe`/`curve`, `--version`). Refuses to run without a caller runtime dir; refuses /run/afanctl, /sys, /etc, /usr. Writes argv to `$RUN/argv.log`, reads argv to `$RUN/status-argv.log`, cmd doc to `$RUN/cmd.json` |
 | status-observe.json | afanctl.status.v1, running, mode observe |
 | status-hold.json | afanctl.status.v1, running, mode hold |
 | state-hold.json | afanctl.state.v1; setup_case copies it to `$RUN/state.json` |
 | state-monitor-only.json | state variant with the monitor_only latch |
 
 `FAKE_AFANCTL_MODE`: `observe` (default) | `hold` | `monitor-only` | `absent` | `error`. monitor-only and absent docs are derived from the two status fixtures with jq; add a mode by extending fake-afanctl's validate_mode + render case, not by adding a third status fixture. `AFANCTL_FAKE_FAIL=1` makes every write exit 1.
+
+`FAKE_AFANCTL_SCHEMA`: `v1` (default) | `v1-supported` | `v2-newer` | `v2-compat` | `v0-older` | `v0-compat` | `missing` | `malformed` — the schema `status` reports, independent of the daemon mode (omafan#4's negotiation matrix). The v2/older/missing variants are derived from the base v1 document with jq, so no extra status fixture is added; `v2-compat` and `v0-compat` answer a `status --json --schema afanctl.status.v1` request with the v1 fixture so the negotiated re-request is exercised (including an older default that advertises a newer supported version). `run_schema <schema> <mode> <args...>` in ctl.test.sh selects both switches.
 
 ## WHERE TO LOOK
 | Task | Location |

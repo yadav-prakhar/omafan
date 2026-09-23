@@ -95,7 +95,7 @@ the current build) and `docs/images/*` (bar widget, `?` overlay).
 | Global chords | `bin/omafan-keybindings` | managed block in `~/.config/hypr/bindings.lua` |
 | Test gate | `tests/run-all.sh` | 9 suites; all hardware-free |
 | Data flow/failure modes | `docs/ARCHITECTURE.md` | daemon-first diagram |
-| Contract | `DESIGN.md` + `DEVIATIONS.md` | 13 deviation rulings (R1–R13) |
+| Contract | `DESIGN.md` + `DEVIATIONS.md` | 14 deviation rulings (R1–R14) |
 | How to contribute | `CONTRIBUTING.md` | branches `<type>/<slug>` off `dev`, Conventional Commits with a scope |
 | Branch model / release | `tests/lib/shipped-paths.sh`, `skills/publish-a-release/` | the shipped/denied path lists and the curated sync (R13) |
 | Task procedures for agents | `skills/<name>/SKILL.md` | gates, live verify, frozen-contract change, screenshots, release |
@@ -111,6 +111,7 @@ No LSP/codegraph coverage for QML+bash (centrality unmeasured; from reads).
 | `Panel` | QML surface | `Panel.qml` | Timer poll, 2 Process gates, IPC target `omafan` |
 | `presetRpm/presetsFor` | JS pure | `Model.js` | ladder from live `(minRpm,maxRpm)` band |
 | `parseStatus` | JS pure | `Model.js` | `omafan.status.v1` → `{ok,status}` wrapper |
+| `parseSchemaId/selectSchema` | JS pure | `Model.js` | family+version parse and highest-mutual selection (R14) |
 | `isUndercoolingHot` | JS pure | `Model.js` | `t≥80°C` + lower hold → refuse (exit 8) |
 | `run_status/run_doctor` | bash verb | `bin/omafan-ctl` | status doc always emitted, even daemon-down |
 | `write_prereqs` | bash gate | `bin/omafan-ctl` | degraded/stale/absent refusals before any write |

@@ -25,7 +25,9 @@ const GUARD_NAMES = ["isUndercoolingHot", "undercoolingWarning"];
 // T3 (Advanced polling control) adds the mode-math function the same way:
 // the lists above and their assertions stay frozen, only the export grows.
 const POLL_NAMES = ["effectivePollSeconds"];
-const ALL_NAMES = NAMES.concat(GUARD_NAMES, POLL_NAMES);
+// omafan#4 (schema negotiation) adds the pure schema helpers the same way.
+const SCHEMA_NAMES = ["parseSchemaId", "selectSchema", "statusNotice"];
+const ALL_NAMES = NAMES.concat(GUARD_NAMES, POLL_NAMES, SCHEMA_NAMES);
 
 let Model;
 try {
@@ -112,6 +114,8 @@ record(GUARD_NAMES.every((n) => typeof Model[n] === "function"),
   "Model.js exports both DESIGN.md §5.1 guard functions as functions");
 record(POLL_NAMES.every((n) => typeof Model[n] === "function"),
   "Model.js exports the T3 polling mode function as a function");
+record(SCHEMA_NAMES.every((n) => typeof Model[n] === "function"),
+  "Model.js exports all three omafan#4 schema helpers as functions");
 
 // --- ES5-safety / purity of the source (the QML + Node dual use) ---------
 
@@ -267,6 +271,131 @@ eq("parseStatus rejects the wrong schema", wrong.ok, false);
 contains("parseStatus names the unexpected schema", wrong.error, "omafan.other.v1");
 eq("parseStatus rejects a JSON array", Model.parseStatus("[1,2,3]").ok, false);
 eq("parseStatus rejects an empty string", Model.parseStatus("   ").ok, false);
+
+// --- schema negotiation (omafan#4) ---------------------------------------
+// Pure parse/select, so the whole matrix runs with no QML and no daemon. The
+// family is "<name>.v<major>"; selection is the highest version both sides
+// understand, with a newer-unknown version tolerated and an older one refused.
+
+eq("parseSchemaId splits family and version",
+  Model.parseSchemaId("afanctl.status.v2"), { family: "afanctl.status", version: 2 });
+eq("parseSchemaId reads a multi-digit version",
+  Model.parseSchemaId("afanctl.status.v10"), { family: "afanctl.status", version: 10 });
+eq("parseSchemaId keeps a dotted family",
+  Model.parseSchemaId("omafan.status.v1"), { family: "omafan.status", version: 1 });
+eq("parseSchemaId rejects a missing version suffix", Model.parseSchemaId("afanctl.status"), null);
+eq("parseSchemaId rejects a non-numeric version", Model.parseSchemaId("afanctl.status.vX"), null);
+eq("parseSchemaId rejects trailing text", Model.parseSchemaId("afanctl.status.v1.extra"), null);
+eq("parseSchemaId rejects an empty string", Model.parseSchemaId(""), null);
+eq("parseSchemaId rejects a number", Model.parseSchemaId(42), null);
+eq("parseSchemaId rejects null", Model.parseSchemaId(null), null);
+
+const AF = "afanctl.status";
+eq("selectSchema matches the exact version",
+  Model.selectSchema(AF, ["afanctl.status.v1"], ["afanctl.status.v1"]),
+  { status: "match", schema: "afanctl.status.v1", version: 1 });
+eq("selectSchema accepts an older-but-supported version",
+  Model.selectSchema(AF, ["afanctl.status.v1"],
+    ["afanctl.status.v1", "afanctl.status.v2"]),
+  { status: "match", schema: "afanctl.status.v1", version: 1 });
+eq("selectSchema picks the highest mutually understood version",
+  Model.selectSchema(AF, ["afanctl.status.v1", "afanctl.status.v2"],
+    ["afanctl.status.v1", "afanctl.status.v2", "afanctl.status.v3"]),
+  { status: "match", schema: "afanctl.status.v2", version: 2 });
+eq("selectSchema flags a newer unknown version",
+  Model.selectSchema(AF, ["afanctl.status.v2"], ["afanctl.status.v1"]),
+  { status: "newer", schema: "afanctl.status.v2", version: 2 });
+eq("selectSchema flags a far-older unsupported version",
+  Model.selectSchema(AF, ["afanctl.status.v0"], ["afanctl.status.v2"]),
+  { status: "older", schema: "afanctl.status.v0", version: 0 });
+eq("selectSchema reports none for a missing schema",
+  Model.selectSchema(AF, [], ["afanctl.status.v1"]),
+  { status: "unknown", schema: null, version: null });
+eq("selectSchema reports none for a malformed schema",
+  Model.selectSchema(AF, ["afanctl.status"], ["afanctl.status.v1"]),
+  { status: "unknown", schema: null, version: null });
+eq("selectSchema ignores another family",
+  Model.selectSchema(AF, ["omafan.status.v1"], ["afanctl.status.v1"]),
+  { status: "unknown", schema: null, version: null });
+eq("selectSchema accepts a bare advertised string",
+  Model.selectSchema(AF, "afanctl.status.v1", ["afanctl.status.v1"]),
+  { status: "match", schema: "afanctl.status.v1", version: 1 });
+
+// A newer omafan.status.v* is tolerated: recognised fields render and a single
+// notice says the document is newer. Unknown fields are left untouched.
+const v2doc = {
+  schema: "omafan.status.v2",
+  ok: true,
+  generated_at: "2026-09-24T00:00:00Z",
+  afanctl: { path: "/usr/bin/afanctl", present: true, version: "0.2.0" },
+  daemon: { running: true, mode: "hold", monitor_only: false,
+            auto_restore_pending: false, uptime_s: 10, polls: 10,
+            state_age_s: 1, state_stale: false, target_rpm: 4200 },
+  hardware: { fan_min_rpm: 1200, fan_max_rpm: 7200, fan_count: 1 },
+  fan: { rpm: 4180, target_rpm: 4200, manual: true, verified: true },
+  thermal: { t_eff_c: 65.0, sensors: [{ label: "Package id 0", temp_c: 65.0 }] },
+  hold: { active: true, preset: "med", rpm: 4200 },
+  presets: [],
+  backend: { kind: "applesmc", abi: "modern" },
+  future_field: { anything: [1, 2, 3] },
+  recent_errors: [],
+  warnings: []
+};
+const v2parsed = Model.parseStatus(JSON.stringify(v2doc));
+eq("parseStatus accepts a newer omafan schema", v2parsed.ok, true);
+eq("parseStatus keeps the recognised daemon fields of a v2 document",
+  v2parsed.status.daemon.mode, "hold");
+eq("parseStatus keeps the fan rpm of a v2 document", v2parsed.status.fan.rpm, 4180);
+eq("parseStatus keeps the hardware band of a v2 document",
+  v2parsed.status.hardware.fan_max_rpm, 7200);
+eq("parseStatus keeps the hold preset of a v2 document",
+  v2parsed.status.hold.preset, "med");
+eq("parseStatus leaves unknown v2 fields untouched",
+  v2parsed.status.backend.kind, "applesmc");
+truthy("parseStatus flags a newer schema with a notice", v2parsed.notice);
+contains("the newer-schema notice names the schema", v2parsed.notice, "omafan.status.v2");
+contains("the newer-schema notice says newer", v2parsed.notice, "newer");
+
+// The emitted version governs the panel's notice: it cannot re-request, so a
+// v2 document still warns even when it also advertises v1.
+const v2compatParsed = Model.parseStatus(JSON.stringify(Object.assign({}, v2doc,
+  { schema_supported: ["omafan.status.v1", "omafan.status.v2"] })));
+eq("parseStatus accepts a v2 document that advertises v1", v2compatParsed.ok, true);
+truthy("parseStatus flags the emitted v2 even when v1 is advertised",
+  v2compatParsed.notice);
+
+// A v1 document that advertises v2 is the older-but-supported case: the emitted
+// version is understood, so it renders with no notice.
+const v1compatParsed = Model.parseStatus(JSON.stringify(Object.assign({}, baseStatus(),
+  { schema_supported: ["omafan.status.v1", "omafan.status.v2"] })));
+eq("parseStatus accepts a v1 document that advertises v2", v1compatParsed.ok, true);
+falsy("parseStatus raises no notice when the emitted version is understood",
+  v1compatParsed.notice);
+
+const oldOmafan = Model.parseStatus(JSON.stringify({ schema: "omafan.status.v0", ok: true }));
+eq("parseStatus refuses an omafan schema older than the minimum", oldOmafan.ok, false);
+contains("the older-schema refusal names the required version",
+  oldOmafan.error, "omafan.status.v1");
+const noSchema = Model.parseStatus(JSON.stringify({ ok: true }));
+eq("parseStatus refuses a document with no schema", noSchema.ok, false);
+const badSchema = Model.parseStatus(JSON.stringify({ schema: "omafan.status" }));
+eq("parseStatus refuses a malformed schema", badSchema.ok, false);
+contains("the malformed-schema refusal names the schema seen",
+  badSchema.error, "omafan.status");
+
+// --- statusNotice: the panel's one quiet line ----------------------------
+
+eq("statusNotice is null for a status with no warnings",
+  Model.statusNotice(withStatus({})), null);
+eq("statusNotice is null for an error document",
+  Model.statusNotice({ ok: false }), null);
+eq("statusNotice returns the schema warning",
+  Model.statusNotice(withStatus({ warnings: [
+    "afanctl reports schema afanctl.status.v2, newer than this plugin understands; Fix: update the omafan plugin"
+  ] })),
+  "afanctl reports schema afanctl.status.v2, newer than this plugin understands; Fix: update the omafan plugin");
+eq("statusNotice ignores non-schema warnings",
+  Model.statusNotice(withStatus({ warnings: ["hardware limits cache not writable"] })), null);
 
 // --- progressFraction ----------------------------------------------------
 
