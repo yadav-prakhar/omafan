@@ -1,0 +1,173 @@
+name: gate
+
+# The repository's first CI workflow (DEVIATIONS.md R13; the CI half of #8).
+#
+# Its first purpose is the branch-model guard: `master` is what users clone into
+# ~/.config/omarchy/plugins/<id>, so a development path there is a
+# prompt-injection surface, and a local pre-commit hook can be skipped or simply
+# not installed. This is the copy of that check nobody can skip.
+#
+# Everything here is hardware-free. The OMAFAN_LIVE and OMAFAN_HW suites are
+# never run: they move a real fan.
+
+on:
+  pull_request:
+    branches: [dev, master]
+  push:
+    branches: [dev, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  branch-model:
+    name: branch model (shipped branch carries no development material)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The suite reads the tree of `master`, so the whole history is needed:
+          # a shallow clone has no such ref and the suite would report SKIPPED.
+          fetch-depth: 0
+
+      - name: assert master carries no denylisted path
+        run: |
+          set -uo pipefail
+          bash tests/branch-model.test.sh | tee branch-model.out
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::master carries development material — a release is a curated sync, never a merge (skills/publish-a-release/sync-master.sh)"
+            exit "$rc"
+          fi
+          # A SKIPPED tree check must never read as a pass here: this job exists
+          # precisely to be the place the assertion cannot be skipped.
+          if ! grep -q '^branch-model: checked refs/' branch-model.out; then
+            echo "::error::the branch-model suite did not inspect any master ref — it printed no 'checked refs/...' line"
+            exit 1
+          fi
+
+      - name: job summary
+        if: always()
+        run: |
+          {
+            echo "## branch model"
+            echo
+            echo '`tests/branch-model.test.sh` against the `master` ref in this checkout:'
+            echo
+            echo '```'
+            cat branch-model.out 2>/dev/null || echo "(the suite produced no output)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  gate:
+    name: hardware-free gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: shell syntax
+        run: bash -n bin/omafan-ctl bin/omafan-keybindings
+
+      # A documented precondition of the `ctl` suite, not a workaround for it.
+      # tests/ctl.test.sh's `in_default_runtime` runs `unshare -rm` to bind-mount
+      # a case runtime dir onto /run/afanctl inside a private user+mount
+      # namespace — that is how the suite exercises the default runtime path
+      # without ever touching the real /run/afanctl. It therefore needs
+      # unprivileged user namespaces, which Ubuntu 24.04 restricts by default
+      # (kernel.apparmor_restrict_unprivileged_userns=1). Without them `unshare`
+      # exits 1 and twelve assertions fail with `expected 0, exited 1`, which is
+      # what this workflow's first run reported on a tree that had not touched
+      # the suite at all.
+      #
+      # The suite is correct and is deliberately left alone; the runner is what
+      # has to provide the capability. The closing probe is a hard assertion on
+      # purpose, and it exercises the namespace AND the bind mount, because
+      # provisioning only the namespace moves the failure from `exit 1` to
+      # `exit 90` rather than fixing it: an environment that still cannot give us a
+      # namespace must fail the job with this reason, never let the suite run
+      # twelve checks short and report green. Same rule as the two suites this
+      # job cannot host — see the job summary below.
+      #
+      # This step only provisions the capability here and asserts it. Issue #11
+      # owns the rest: stating the requirement in docs/TESTING.md and at
+      # in_default_runtime, making the suite self-diagnose a missing namespace
+      # instead of emitting twelve misleading assertion failures, and deciding
+      # the policy for an environment that genuinely cannot provide one.
+      - name: runtime dir and user namespaces for tests/ctl.test.sh
+        run: |
+          set -euo pipefail
+          knob=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+          if [ -e "$knob" ]; then
+            echo "$knob = $(cat "$knob")"
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          else
+            echo "$knob is absent on this runner — nothing to relax"
+          fi
+          # `mount --bind` needs the target to exist, and a fresh runner has
+          # never run afanctl, so its documented default runtime dir is absent.
+          # Without this the namespace is created and the bind then fails,
+          # which the suite reports as `exit 90` rather than `exit 1`.
+          sudo mkdir -p /run/afanctl
+          # Assert the whole capability the suite needs, not just half of it:
+          # a namespace AND a bind mount onto that dir. `unshare -rm true`
+          # alone passes while the bind still fails.
+          probe="$(mktemp -d)"
+          unshare -rm bash -c 'mount --bind "$1" /run/afanctl || exit 90' _ "$probe"
+          echo "user namespaces and /run/afanctl bind mount available"
+
+      - name: suites
+        run: |
+          set -uo pipefail
+          fail=0
+          # Same shape as tests/run-all.sh's own run_suite: every suite runs,
+          # every failure is recorded, and the job fails at the end.
+          run_suite() { # run_suite <name> <command...>
+            local name="$1"
+            shift
+            echo "::group::$name"
+            if "$@"; then
+              echo "$name PASS" >> suites.out
+            else
+              echo "$name FAIL" >> suites.out
+              fail=1
+            fi
+            echo "::endgroup::"
+          }
+          run_suite manifest     bash tests/manifest.test.sh
+          run_suite model        node tests/model.test.mjs
+          run_suite ctl          bash tests/ctl.test.sh
+          run_suite keybindings  bash tests/keybindings.test.sh
+          run_suite panel-slider bash tests/panel-slider.test.sh
+          run_suite panel-refresh bash tests/panel-refresh.test.sh
+          run_suite branch-model bash tests/branch-model.test.sh
+          cat suites.out
+          exit "$fail"
+
+      # Two of the nine gate suites need tooling a GitHub runner does not have,
+      # and the decision to leave them out is recorded here rather than hidden
+      # behind a suite that skips itself and still reports green. Closing this —
+      # provisioning them or waiving them on the record — is issue #8's job.
+      - name: job summary
+        if: always()
+        run: |
+          {
+            echo "## hardware-free gate"
+            echo
+            echo "### Ran"
+            echo
+            echo '```'
+            cat suites.out 2>/dev/null || echo "(the step did not get that far)"
+            echo '```'
+            echo
+            echo "### Deliberately not run here"
+            echo
+            echo "| Suite | Needs | Status |"
+            echo "|---|---|---|"
+            echo "| \`plugin-validate\` | the \`omarchy\` CLI, which is not installable on this runner | **not run** — it hard-fails when \`omarchy\` is absent, so running it here would only assert the runner's shape |"
+            echo "| \`qml-lint\` | \`qmllint\` plus the installed omarchy shell tree | **not run** — it skips itself when they are absent, which would pass a check that never happened |"
+            echo
+            echo "Both stay a local gate step (\`bash tests/run-all.sh\`) until issue #8 provisions or waives them. This job is **not** the full nine-suite gate."
+          } >> "$GITHUB_STEP_SUMMARY"

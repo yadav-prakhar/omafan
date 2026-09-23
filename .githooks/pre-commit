@@ -1,37 +1,53 @@
 #!/bin/sh
-# Refuse to put development material on the default branch.
+# Refuse to commit development material on the shipped branch.
 #
-# `omarchy plugin add` clones the whole repository into a user's shell config, so
-# the default branch carries the plugin, its tests and the operator documentation
-# only (DEVIATIONS.md R11, R12). This repository has no CI, so a local hook is the
-# only thing that can catch a stray `worknotes/` or `AGENTS.md` commit.
+# What this hook is, and is not: a convenience that catches the mistake early on
+# the machine making it. It is NOT the guarantee. A hook does not run on a
+# fast-forward merge (no commit is created), is skipped by `--no-verify`, goes
+# stale as a copy, and is absent in a fresh clone until someone installs it. The
+# guarantee is `tests/branch-model.test.sh` in the gate and the same suite in
+# `.github/workflows/ci.yml`, where it cannot be skipped. See INSTALL below.
 #
-# Enable once per clone:  git config core.hooksPath .githooks
-# Bypass deliberately:    OMAFAN_ALLOW_DEV_PATHS=1 git commit ...
+# The check keys on the *branch name* `master`, never on "the default branch":
+# since R13 the default branch is `dev`, the integration branch that carries all
+# of this material on purpose, and a guard keyed on the default branch would
+# refuse every normal commit.
+#
+# INSTALL, once per clone — copies, not core.hooksPath, and both hooks:
+#
+#   for h in pre-commit pre-merge-commit guard.sh; do
+#       cp .githooks/$h .git/hooks/$h && chmod +x .git/hooks/$h
+#   done
+#
+# `git config core.hooksPath .githooks` looks tidier but goes inert exactly
+# where it matters: `.githooks/` is denylisted, so checking out `master` removes
+# the directory and git then finds no hook to run. `.git/` belongs to no branch,
+# so copies there survive the switch. Re-copy them when these files change.
+#
+# Bypass deliberately:  OMAFAN_ALLOW_DEV_PATHS=1 git commit ...
 set -u
 
 [ "${OMAFAN_ALLOW_DEV_PATHS:-0}" = "1" ] && exit 0
 
 branch=$(git symbolic-ref --quiet --short HEAD 2>/dev/null || echo "")
-case "$branch" in
-    master | main) ;;
-    *) exit 0 ;;   # detached HEAD (rebase, cherry-pick) or a normal feature branch
-esac
+# Detached HEAD (rebase, cherry-pick, the release sync's worktree) and every
+# feature branch are someone else's problem; only the shipped branch is guarded,
+# and it is checked *before* guard.sh and the lists are required so that a
+# branch without them — an old one, or one predating this hook — is never
+# blocked.
+#
+# The shipped branch's name is the one fact this hook needs before it can read
+# the lists, so it also appears here as a literal. tests/lib/shipped-paths.sh is
+# its home and tests/branch-model.test.sh asserts every copy agrees with it.
+[ "$branch" = "master" ] || exit 0
 
-dev_paths='^AGENTS\.md$|^bin/AGENTS\.md$|^tests/AGENTS\.md$|^skills/|^worknotes/|^orchestration/|^PLAN\.md$|^QUESTIONS\.md$|^\.githooks/'
+guard="$(dirname "$0")/guard.sh"
+if [ ! -r "$guard" ]; then
+    printf 'pre-commit: cannot read %s — refusing to guess on %s.\n' "$guard" "$branch" >&2
+    printf '  re-install the hooks, or: OMAFAN_ALLOW_DEV_PATHS=1 git commit ...\n' >&2
+    exit 1
+fi
+# shellcheck source=.githooks/guard.sh
+. "$guard"
 
-offenders=$(git diff --cached --name-only --diff-filter=ACMR | grep -E "$dev_paths" || true)
-[ -n "$offenders" ] || exit 0
-
-printf 'pre-commit: refusing to commit development material on %s\n\n' "$branch" >&2
-printf '%s\n' "$offenders" | sed 's/^/  /' >&2
-cat >&2 <<'MSG'
-
-These paths exist to develop omafan and must never reach the default branch:
-users clone it into ~/.config/omarchy/plugins/<id> (DEVIATIONS.md R11, R12).
-
-    git switch dev      # land the change there instead
-
-Deliberate override: OMAFAN_ALLOW_DEV_PATHS=1 git commit ...
-MSG
-exit 1
+omafan_guard pre-commit staged

@@ -1,9 +1,14 @@
 # PUBLISHING.md — marketplace submission package
 
 This document contains everything needed to list omafan on
-[plugins.omarchy.org](https://plugins.omarchy.org). The operator copies the
+[plugins.omarchy.org](https://plugins.omarchy.org), and the release flow that
+puts a version on the shipped branch in the first place. The operator copies the
 issue body verbatim into the marketplace's GitHub issue form after pushing the
 public repository.
+
+Branch model, in one line: work lands on `dev` (the default branch); `master` is
+the shipped branch and is updated only by the curated sync in §2 — never by a
+merge. [DEVIATIONS.md](../DEVIATIONS.md) R11 states why, R13 states how.
 
 ---
 
@@ -26,8 +31,55 @@ public repository.
       `omarchy plugin add https://github.com/yadav-prakhar/omafan.git --enable`
       and removes cleanly with
       `omarchy plugin remove io.github.yadav-prakhar.omafan`.
+- [ ] `bash tests/branch-model.test.sh` is green: the tree of `master` carries no
+      development path. Users clone the **whole repository**, so this is the check
+      that keeps `worknotes/`, `skills/`, `orchestration/` and every `AGENTS.md`
+      out of a stranger's installation.
 
-## 2. Repository commands (operator may re-run)
+Everything above is run against the tree that will actually ship, which means
+*after* the §2 sync — `master`, not `dev`. The quickest way to see what a user
+gets is to clone it:
+
+```sh
+git clone --branch master --single-branch \
+  https://github.com/yadav-prakhar/omafan.git /tmp/omafan-shipped
+cd /tmp/omafan-shipped
+omarchy plugin validate .
+bash tests/run-all.sh
+```
+
+## 2. Release: the curated sync onto `master`
+
+`master` is what `omarchy plugin add` clones into `~/.config/omarchy/plugins/<id>`.
+A release copies an allowlist of shipped paths from `dev` onto `master` as one
+commit and tags it. It is **never** a `git merge`: a merge would put
+`worknotes/`, `orchestration/`, `skills/`, `PLAN.md`, `QUESTIONS.md` and every
+`AGENTS.md` into every user's installation, where their coding agent can read and
+act on it (ruling R11; the sync is R13's replacement for R11's prohibition).
+
+```sh
+# 1. land everything on dev, version bumped, gate green
+bash tests/run-all.sh
+
+# 2. review what the release would change on master — writes nothing
+skills/publish-a-release/sync-master.sh --from dev
+skills/publish-a-release/sync-master.sh --from dev --full-diff
+
+# 3. write it as one commit, and tag it
+skills/publish-a-release/sync-master.sh --from dev --commit --tag vX.Y.Z
+
+# 4. prove the shipped tree is clean, then push
+bash tests/branch-model.test.sh
+git push origin master --follow-tags
+```
+
+The script copies only `OMAFAN_SHIPPED_PATHS`, prunes every denylisted path the
+allowlist swept up, and **refuses to write if any denylisted path survives**.
+Both lists live in `tests/lib/shipped-paths.sh`. Running it twice changes
+nothing. The version bump and the wiki refresh are in
+`skills/publish-a-release/SKILL.md` (on `dev`).
+
+## 3. Repository commands (operator may re-run)
 
 ```sh
 # Create the public repo (one-time; skip if already created)
@@ -35,11 +87,15 @@ gh repo create yadav-prakhar/omafan --public --license GPL-3.0-only \
   --description "Fan control for pre-T2 Intel Macs via afanctl — presets, RPM slider, live thermals, keyboard shortcuts, zero new privilege surface" \
   --source . --push
 
+# Branch model (one-time; R13): dev integrates, master ships
+gh repo edit yadav-prakhar/omafan --default-branch dev
+gh api -X PATCH repos/yadav-prakhar/omafan -f delete_branch_on_merge=true
+
 # After pushing the final tree
 gh repo edit yadav-prakhar/omafan --add-topic "omarchy-plugin,fan-control,mac,intel,smc"
 ```
 
-## 3. Marketplace issue body (copy-paste verbatim)
+## 4. Marketplace issue body (copy-paste verbatim)
 
 The following is the exact text to paste into the
 [plugin submission issue form](https://plugins.omarchy.org/publish.html) on
@@ -104,7 +160,7 @@ The following is the exact text to paste into the
 
 ---
 
-## 4. Post-submission notes
+## 5. Post-submission notes
 
 - Nothing in this repository submits the issue automatically; the repository owner
   submits it from their own GitHub account.

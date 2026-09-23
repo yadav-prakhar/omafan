@@ -64,6 +64,91 @@ because these two files were owned by completed tickets:
   overrides, and a fresh state writes normally. Not yet covered by a regression
   case in `tests/ctl.test.sh` (open item, listed in `docs/BUILD-LOG.md`).
 
+- **R13 — `dev` is the integration branch; a release is a curated sync, never a
+  merge (supersedes R11's *mechanism*, keeps its guarantee; issue #2,
+  2026-09-21).** Old: the shipped branch was also the default branch, so work
+  landed on `master` first and `dev` caught up one-way afterwards
+  (`git checkout dev && git merge --ff-only master`). R11 and R12 kept
+  development material off `master` by a prohibition — *never merge `dev` into
+  the default branch* — enforced by `.githooks/pre-commit`, whose comments and
+  message spoke of "the default branch". New: **`dev` is the integration branch
+  and GitHub's default branch.** Feature branches `<type>/<slug>` cut from `dev`
+  and merge into `dev`, which carries everything: runtime, operator docs and
+  development material. `master` stays the shipped branch and is never merged
+  into; it is updated only by a **curated sync** —
+  `skills/publish-a-release/sync-master.sh` copies the shipped path allowlist
+  from `dev` into a throwaway worktree on `master`, prunes every denylisted path
+  the allowlist swept up, **refuses to write if any denylisted path survives**,
+  prints the diff for review, and only with `--commit` writes it as one commit
+  and (with `--tag`) tags it. Running it twice changes nothing. The two lists
+  have one home, `tests/lib/shipped-paths.sh`, read by four consumers — the sync
+  script, the pre-commit hook, the gate suite and CI — so there is no mirror to
+  chase. The allowlist (`master` carries exactly): `BarWidget.qml`, `Panel.qml`,
+  `Model.js`, `KeyboardHelp.qml`, `manifest.json`, `bin/`, `tests/`, `docs/`,
+  `preview.png`, `README.md`, `PRD.md`, `DESIGN.md`, `DEVIATIONS.md`,
+  `CHANGELOG.md`, `CONTRIBUTING.md`, `SECURITY.md`, `LICENSE`, `.github/`. The
+  denylist (never on `master`): `AGENTS.md`, `bin/AGENTS.md`, `tests/AGENTS.md`,
+  `orchestration/AGENTS.md`, `worknotes/`, `orchestration/`, `skills/`,
+  `.githooks/`, `PLAN.md`, `QUESTIONS.md`, `.recon/` — plus two entries issue #2
+  does not list, added here with their reason: `docs/agents/`, the agent
+  instruction files that arrived inside `docs/` after R12 ruled that tree "100%
+  shipped" (same class as `bin/AGENTS.md`, and inside an allowlisted directory),
+  and `.omc/`, agent operational state, gitignored and denied at any depth as
+  well so a force-added copy cannot ride along. Three denylist entries sit
+  *inside* allowlisted directories, which is why the denylist is a filter applied
+  after the copy and not merely the complement of the allowlist; any `AGENTS.md`
+  at any depth matches, so the next one is caught before it ships rather than
+  after someone updates the list. **`.githooks/pre-commit` now keys on the
+  literal branch name `master`**, not on "the default branch": the default branch
+  is now `dev`, the branch that carries this material on purpose, so a guard
+  keyed on the default would refuse every normal commit — the single most likely
+  way to get this change wrong. It checks the branch *before* it requires the
+  lists, so a branch that predates them is never blocked, and fails closed only
+  on `master`. Its install instruction changed with it: a **copy** into
+  `.git/hooks/pre-commit`, because `git config core.hooksPath .githooks` — what
+  R12 documented — goes inert exactly where it matters. `.githooks/` is denied on
+  `master`, so checking `master` out removes the directory and git finds no hook
+  to run; `.git/` belongs to no branch. Verified in a scratch clone: on `master`
+  a staged `AGENTS.md` is refused, a shipped-only change commits, and a deleted
+  list file refuses rather than guesses; on `dev` and on a feature branch the
+  same staged development paths commit normally. Why: the guarantee R11 exists to protect is
+  unchanged and is *not* tidiness — `omarchy plugin add` clones the whole
+  repository into a user's `~/.config/omarchy/plugins/<id>`, so a root
+  `AGENTS.md` on the shipped branch is content a stranger's coding agent can
+  discover and act on inside their own installation, a prompt-injection surface.
+  R11's *mechanism* had to go anyway: with `master` as the default branch there
+  was nowhere to integrate work before it shipped, every feature branch started
+  from the shipped tree, and the epic (#1) needs a branch that can hold
+  unreleased contract changes. A plain `git merge dev` at release would ship
+  `worknotes/`, `orchestration/`, `skills/`, `PLAN.md`, `QUESTIONS.md` and every
+  `AGENTS.md` into every user's install; the sync's refusal and the new gate
+  suite are the two places that now make that impossible rather than merely
+  forbidden. Affected: `DESIGN.md §10` (nine gate suites), `AGENTS.md` (header,
+  STRUCTURE, COMMANDS), `CONTRIBUTING.md` (branch naming, commit rules, the
+  development-material section, a new release section, and an explicit statement
+  that the sibling repo `afanctl` has **no** equivalent constraint — nothing
+  clones it into a user's config, so there `dev` → `master` at release is an
+  ordinary merge), `docs/PUBLISHING.md` (a new §2 release flow),
+  `docs/TESTING.md` (the gate table), `README.md` and `tests/AGENTS.md` and
+  `skills/run-the-gates` (suite count), `skills/README.md`,
+  `skills/publish-a-release/SKILL.md` + the new `sync-master.sh`,
+  `.githooks/pre-commit`, `.gitignore` (`.omc/`), `CHANGELOG.md` Unreleased, and
+  the new `tests/lib/shipped-paths.sh`, `tests/branch-model.test.sh`,
+  `tests/run-all.sh` 9th-suite line and `.github/workflows/ci.yml` — the
+  repository's first CI workflow, which exists so the denylist is asserted
+  somewhere a local hook cannot be skipped (the CI half of #8). Ruling: accepted
+  — no runtime file, no privilege surface, no manifest change. The new gate suite
+  is the one test allowed to assert a repository property rather than plugin
+  behaviour, because a shipped branch carrying agent instructions **is** a broken
+  plugin, not a stale note: it reads the tree of `master` (or
+  `origin/master`), names every offender, and reports a visible `SKIPPED` line
+  when no such ref exists in the clone rather than passing quietly — CI fetches
+  the ref and asserts the `checked` line, so the skip cannot hide there.
+  Deliberately not done here: making the CI gate a required status check, and
+  running the two suites that need external tooling (`plugin-validate` needs
+  `omarchy`, `qml-lint` needs `qmllint`) — the workflow names both as not run,
+  with the reason, in its job summary, and #8 owns closing that.
+
 - **R12 — work records live in the repository; `docs/` is shipped surface only
   (operator direction, 2026-09-20).** Old: the root `AGENTS.md` WORK RECORDS
   block told every agent to record all work in the maintainer's Obsidian vault at

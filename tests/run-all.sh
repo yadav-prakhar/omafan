@@ -38,7 +38,7 @@ run_suite() {
 }
 
 if [[ ${1:-} == --list ]]; then
-    echo "plugin-validate manifest.test.sh model.test.mjs ctl.test.sh keybindings.test.sh qml-lint.sh panel-slider.test.sh panel-refresh.test.sh"
+    echo "plugin-validate manifest.test.sh model.test.mjs ctl.test.sh keybindings.test.sh qml-lint.sh panel-slider.test.sh panel-refresh.test.sh branch-model.test.sh"
     exit 0
 fi
 
@@ -62,6 +62,8 @@ run_suite "qml-lint" tests/qml-lint.sh bash tests/qml-lint.sh
 run_suite "panel-slider" tests/panel-slider.test.sh bash tests/panel-slider.test.sh
 # 8. T5 panel refresh row regression (structural Panel.qml settings-write assertions)
 run_suite "panel-refresh" tests/panel-refresh.test.sh bash tests/panel-refresh.test.sh
+# 9. the branch model: the shipped branch carries no development material (R13)
+run_suite "branch-model" tests/branch-model.test.sh bash tests/branch-model.test.sh
 
 echo
 echo "PASS suites ${pass_suites} / FAIL suites ${fail_suites} / SKIP ${skip_suites}"

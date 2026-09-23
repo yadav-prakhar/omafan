@@ -11,6 +11,7 @@ What belongs here and what does not: [README.md](README.md).
 | Slider Auto-reset + Advanced polling control (R9) | [2026-09-17-advanced-polling](2026-09-17-advanced-polling/SUMMARY.md) | done | 2026-09-17 | 2026-09-17 |
 | In-panel refresh row — Auto/Custom + stepper (R10) | [2026-09-17-in-panel-refresh](2026-09-17-in-panel-refresh/SUMMARY.md) | done | 2026-09-17 | 2026-09-17 |
 | The development record moves into the repository (R12) | [2026-09-20-in-repo-worknotes](2026-09-20-in-repo-worknotes/SUMMARY.md) | done | 2026-09-20 | 2026-09-20 |
+| `dev` as integration branch, filtered release to `master` (R13, issue #2) | [2026-09-21-branch-model](2026-09-21-branch-model/SUMMARY.md) | done | 2026-09-21 | 2026-09-21 |
 
 The roadmap — what is done and what is next — is [BACKLOG.md](BACKLOG.md).
 
@@ -36,4 +37,7 @@ The roadmap — what is done and what is next — is [BACKLOG.md](BACKLOG.md).
   entry *before* the code moves, with the ruling id in the commit body.
 - **Never claim an unrun check.** `unverified` is a legitimate status; a green
   claim without output is not.
-- **Nothing on the default branch.** See [README.md](README.md) and ruling R11.
+- **Nothing on the shipped branch.** `master` carries the runtime, its tests and
+  the operator documentation only; `dev` is the integration and default branch,
+  and a release is a curated sync, never a merge. See [README.md](README.md) and
+  rulings R11 (the guarantee) and R13 (the mechanism).

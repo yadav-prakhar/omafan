@@ -39,6 +39,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `tests/branch-model.test.sh`, the gate's 9th suite: it reads the tree of
+  `master` (or `origin/master`) and fails naming every denylisted development
+  path it finds. With no such ref in the clone it prints a visible `SKIPPED`
+  line rather than passing quietly (ruling R13).
+- `.github/workflows/ci.yml` — the repository's first CI workflow, on PRs and
+  pushes to `dev` and `master`: the branch-model guard (where it cannot be
+  skipped, unlike a local hook) plus the hardware-free suites a GitHub runner
+  can run. The two suites needing external tooling (`plugin-validate` needs the
+  `omarchy` CLI, `qml-lint` needs `qmllint`) are named as not run, with the
+  reason, in the job summary rather than skipping themselves into a green
+  result; issue #8 owns closing that.
 +- In-panel refresh control: the panel's new REFRESH row (below the slider)
 +  sets the Advanced polling control from the UI — Auto/Custom chips write
 +  `poll_mode` and, in custom mode, a `−`/`+` stepper moves `poll_seconds` by
@@ -96,6 +107,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `git config core.hooksPath .githooks`, refuses a commit on the default branch
   that touches development material (ruling R12). No runtime file, no privilege
   surface and no manifest change.
+
+- **Branch model: `dev` integrates, `master` ships** (ruling R13). `dev` is now
+  the default branch; feature branches cut from it and PRs target it. `master`
+  remains the branch users install and is **never merged into** — a release is a
+  curated sync: `skills/publish-a-release/sync-master.sh` copies only the shipped
+  path allowlist from `dev` onto `master` as one commit, prunes every denylisted
+  development path the allowlist swept up (three of them sit inside allowlisted
+  directories), refuses to write if any survives, and shows the diff before
+  committing. `omarchy plugin add` clones the whole repository into
+  `~/.config/omarchy/plugins/<id>`, so a plain merge would put `worknotes/`,
+  `orchestration/`, `skills/`, `PLAN.md` and every `AGENTS.md` inside a
+  stranger's installation — R11's guarantee, unchanged; only its mechanism is
+  replaced. `.githooks/pre-commit` now keys on the branch **name** `master`
+  rather than on "the default branch", which is `dev` and carries development
+  material on purpose, and both path lists moved to one home,
+  `tests/lib/shipped-paths.sh`, read by the hook, the release sync, the new gate
+  suite and CI. No runtime file, no privilege surface and no manifest change.
 
 ## [1.0.0] - 2026-09-15
 

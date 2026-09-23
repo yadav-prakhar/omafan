@@ -11,7 +11,13 @@ run, in what order, and which traps have already bitten this project.
 | [live-verify-in-the-shell](live-verify-in-the-shell/SKILL.md) | checking a change against a running Omarchy session |
 | [change-a-frozen-contract](change-a-frozen-contract/SKILL.md) | a behaviour change contradicts `DESIGN.md` |
 | [capture-docs-screenshots](capture-docs-screenshots/SKILL.md) | refreshing README / wiki images from the real UI |
-| [publish-a-release](publish-a-release/SKILL.md) | cutting a version and updating the marketplace listing |
+| [publish-a-release](publish-a-release/SKILL.md) | cutting a version, syncing `master`, updating the marketplace listing |
+
+One skill carries an executable: [`publish-a-release/sync-master.sh`](publish-a-release/sync-master.sh),
+the curated `dev` → `master` release sync. It lives here rather than in `bin/`
+because `bin/` is on the shipped path allowlist — a release tool placed there
+would ship to every user's install, which is the thing the allowlist exists to
+prevent (`DEVIATIONS.md` R13).
 
 ## How an agent should use them
 

@@ -486,7 +486,10 @@ Rules:
 `model.test.mjs` (node), `ctl.test.sh` (fake-afanctl), `keybindings.test.sh`
 (tempdir HOME + stub hyprctl), `qml-lint.sh` (`/usr/lib/qt6/bin/qmllint -I
 "$OMARCHY_PATH/shell"`), `panel-slider.test.sh` and `panel-refresh.test.sh`
-(structural `Panel.qml` assertions). Each suite records its own failures and runs
+(structural `Panel.qml` assertions), and `branch-model.test.sh` (the shipped
+branch carries no development material — ruling R13; the one suite that asserts
+a repository property, because a shipped branch carrying agent instructions is a
+broken plugin). Each suite records its own failures and runs
 through to its `summarize`; `run-all.sh` prints a final `PASS n / FAIL m` line and
 exits non-zero when any suite failed. `tests/integration-shell.sh` and
 `tests/hw-smoke.sh` are

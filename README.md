@@ -395,7 +395,7 @@ There is no build step and no package manager — a checkout *is* the plugin. Th
 gate is hardware-free and is the only thing that counts as proof:
 
 ```sh
-bash tests/run-all.sh                 # 8 suites: plugin-validate, manifest, model, ctl, keybindings, qml-lint, panel-slider, panel-refresh
+bash tests/run-all.sh                 # 9 suites: plugin-validate, manifest, model, ctl, keybindings, qml-lint, panel-slider, panel-refresh, branch-model
 bash tests/run-all.sh --list          # the suite names
 omarchy plugin validate .             # the shell's own structural gate
 bash -n bin/omafan-ctl bin/omafan-keybindings
@@ -430,7 +430,8 @@ together.
 
 [CONTRIBUTING.md](CONTRIBUTING.md) is the long version. The short one:
 
-- Branches: `<type>/<slug>` — `feat/`, `fix/`, `docs/`, `test/`, `chore/`, `refactor/`.
+- Branches: `<type>/<slug>` off `dev` — `feat/`, `fix/`, `docs/`, `test/`,
+  `chore/`, `refactor/`. PRs target `dev`, the default branch.
 - Commits: [Conventional Commits](https://www.conventionalcommits.org/) with a
   scope from the file layout — `fix(keybindings): …`, `feat(panel): …`,
   `docs(readme): …` — imperative subject, 72 characters, and the command you ran
@@ -440,15 +441,25 @@ together.
 
 ### Branch layout
 
-The default branch is what a user installs, so it holds the plugin, its tests and
-the operator documentation only. Everything that exists to *develop* omafan lives
-on the [`dev` branch](https://github.com/yadav-prakhar/omafan/tree/dev): the agent
-notes (`AGENTS.md` at the root plus per-directory notes in `bin/` and `tests/`),
-the task procedures in `skills/` (running the gate, verifying in a live shell,
-changing a frozen contract, capturing screenshots, cutting a release), the build
-record (`PLAN.md`, `QUESTIONS.md`, `orchestration/`), the development record for
-everything after it — `worknotes/`, one folder per piece of work holding its
-plan, its evidence, its review and its summary — and the
+```
+feature branch  ->  dev  ->  (curated sync at release)  ->  master
+```
+
+[`dev`](https://github.com/yadav-prakhar/omafan/tree/dev) is the integration
+branch and the default branch: branches cut from it, PRs target it, and it
+carries everything. `master` is what a user installs, so it holds the plugin, its
+tests and the operator documentation only — and it is **never merged into**. A
+release copies an allowlist of shipped paths from `dev` onto `master` as one
+commit, then tags it, because `omarchy plugin add` clones the whole repository
+into your config directory and development material has no business being there.
+
+Everything that exists to *develop* omafan lives on `dev`: the agent notes
+(`AGENTS.md` at the root plus per-directory notes in `bin/`, `tests/` and
+`docs/agents/`), the task procedures in `skills/` (running the gate, verifying in
+a live shell, changing a frozen contract, capturing screenshots, cutting a
+release), the build record (`PLAN.md`, `QUESTIONS.md`, `orchestration/`), the
+development record for everything after it — `worknotes/`, one folder per piece
+of work holding its plan, its evidence, its review and its summary — and the
 `orchestration/live-install.sh` live-check tool.
 
 ```sh

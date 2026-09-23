@@ -1,7 +1,7 @@
 # tests/
 
 ## OVERVIEW
-Hardware-free gate: 8 hermetic suites driven by run-all.sh, plus 2 guarded live suites that never run by default.
+Hardware-free gate: 9 hermetic suites driven by run-all.sh, plus 2 guarded live suites that never run by default.
 
 ## STRUCTURE
 
@@ -16,8 +16,11 @@ Hardware-free gate: 8 hermetic suites driven by run-all.sh, plus 2 guarded live 
 | qml-lint | qml-lint.sh | `bash tests/qml-lint.sh` | qmllint + `$OMARCHY_PATH/shell`; prints SKIP and exits 0 when either is absent |
 | panel-slider | panel-slider.test.sh | `bash tests/panel-slider.test.sh` | none; structural Panel.qml assertions for the T2 Auto-reset guards |
 | panel-refresh | panel-refresh.test.sh | `bash tests/panel-refresh.test.sh` | none; structural Panel.qml assertions for the T5 in-panel refresh row |
+| branch-model | branch-model.test.sh | `bash tests/branch-model.test.sh` | a `master` (or `origin/master`) ref; reads its tree and asserts no denylisted path (R13). Lists live in `lib/shipped-paths.sh`. No such ref = a printed SKIPPED line, not a silent pass |
 
-`tests/run-all.sh --list` prints the 8 gate names. A missing suite file is a SKIP, never a FAIL.
+`tests/run-all.sh --list` prints the 9 gate names. A missing suite file is a SKIP, never a FAIL.
+
+branch-model is the one suite asserting a repository property rather than plugin behaviour: users clone the whole repo into `~/.config/omarchy/plugins/<id>`, so a shipped branch carrying `AGENTS.md`/`worknotes/`/`skills/` is a broken plugin, not a stale note (R11's guarantee, R13's mechanism).
 
 ### Live suites (never in run-all.sh; both print SKIP and exit 0 without the guard)
 - `OMAFAN_LIVE=1 tests/integration-shell.sh`: live omarchy-shell IPC. Only write is the intentional `preset bogus` error path.
