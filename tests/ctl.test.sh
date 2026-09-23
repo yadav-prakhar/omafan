@@ -7,7 +7,10 @@
 # Covered here: each verb's happy path; exit codes 0-8 with the exact situation
 # that produces them; the section 4.1-4.4 documents field by field; dry-run
 # writing nothing; the section 5.1 undercooling guard (exit 8) and its --force
-# override; the section 4.5 cycle verb; and the read/write privilege split.
+# override; the section 4.5 cycle verb; the read/write privilege split; and
+# (section 22) omafan#4 schema negotiation — exact match, older-but-supported,
+# newer-unknown, far-older, missing and malformed, plus the negotiated
+# `status --schema` re-request and the newer afanctl.state.v* tolerance.
 #
 # The fast path is held to section 4.1's values, not merely its types: with a
 # seeded state.json that carries t_eff_c, the document must render that number
@@ -67,6 +70,14 @@ run_mode() {
     local mode="$1"
     shift
     FAKE_AFANCTL_MODE="$mode" ctl "$@"
+}
+
+# run_schema <schema> <mode> <args...> - ctl with both the daemon mode and the
+# schema the fixture reports selected (omafan#4 negotiation matrix).
+run_schema() {
+    local schema="$1" mode="$2"
+    shift 2
+    FAKE_AFANCTL_SCHEMA="$schema" FAKE_AFANCTL_MODE="$mode" ctl "$@"
 }
 
 jget() { printf '%s' "$1" | jq -r "$2" 2>/dev/null; }
@@ -735,6 +746,113 @@ assert_eq "0" "$(test -e "$RUN/argv.log" && echo 1 || echo 0)" "cycle --dry-run 
 
 setup_case "$FIX/state-monitor-only.json"
 assert_exit_code 6 run_mode monitor-only cycle
+
+# ---------------------------------------------------------------------------
+# 22. schema negotiation (omafan#4): tolerance, not a version bump
+# ---------------------------------------------------------------------------
+# The default v1 daemon is unchanged; a newer schema degrades to one warning;
+# a v2 daemon that advertises v1 is re-asked for v1; an older schema is refused.
+
+# 22a. exact match: the default v1 schema, no schema_supported, no notice.
+setup_case "$FIX/state-hold.json"
+out="$(run_schema v1 hold status --json 2>/dev/null)"; rc=$?
+assert_eq 0 "$rc" "the default v1 schema still exits 0"
+assert_eq "omafan.status.v1" "$(jget "$out" '.schema')" "the plugin still emits omafan.status.v1"
+assert_eq "1200" "$(jget "$out" '.hardware.fan_min_rpm')" "the v1 band is read as before"
+assert_eq "0" "$(jget "$out" '[.warnings[] | select(test("schema"))] | length')" \
+    "a v1 daemon raises no schema warning"
+
+# 22b. older-but-supported: a v1 document that also advertises v2 is understood.
+setup_case "$FIX/state-hold.json"
+out="$(run_schema v1-supported hold status --json 2>/dev/null)"; rc=$?
+assert_eq 0 "$rc" "a v1 document advertising v2 exits 0"
+assert_eq "7200" "$(jget "$out" '.hardware.fan_max_rpm')" "the v1 band is still read"
+assert_eq "0" "$(jget "$out" '[.warnings[] | select(test("newer"))] | length')" \
+    "an understood v1 document raises no newer warning"
+
+# 22c. newer-unknown: a v2 document with unknown fields renders the recognised
+# ones and warns once; the emitted plugin schema is unchanged.
+setup_case "$FIX/state-hold.json"
+out="$(run_schema v2-newer observe status --json --full 2>/dev/null)"; rc=$?
+assert_eq 0 "$rc" "a newer afanctl schema still exits 0 (never a hard error)"
+assert_eq "omafan.status.v1" "$(jget "$out" '.schema')" "the plugin still emits omafan.status.v1"
+assert_eq "1200" "$(jget "$out" '.hardware.fan_min_rpm')" "recognised band renders from a v2 document"
+assert_eq "3" "$(jget "$out" '.thermal.sensors | length')" "recognised sensors render from a v2 document"
+assert_eq "64.0" "$(jget "$out" '.thermal.t_eff_c')" "recognised temperature renders from a v2 document"
+assert_eq "1" "$(jget "$out" '[.warnings[] | select(test("afanctl.status.v2"))] | length')" \
+    "exactly one newer-schema notice is present"
+assert_contains "$(jget "$out" '.warnings | join(" ")')" "newer" \
+    "the notice says the daemon is newer than the plugin"
+
+# 22d. highest mutual: a v2 daemon advertising v1 is re-asked for v1, so the
+# fields the plugin understands come back instead of the restructured v2 shape.
+setup_case "$FIX/state-hold.json"
+out="$(run_schema v2-compat observe status --json 2>/dev/null)"; rc=$?
+assert_eq 0 "$rc" "a v2 daemon advertising v1 exits 0"
+assert_eq "1200" "$(jget "$out" '.hardware.fan_min_rpm')" \
+    "the v1 band is recovered by the negotiated re-request"
+assert_eq "0" "$(jget "$out" '[.warnings[] | select(test("newer"))] | length')" \
+    "negotiating down to v1 raises no newer warning"
+assert_contains "$(cat -- "$RUN/status-argv.log" 2>/dev/null)" "afanctl.status.v1" \
+    "the CLI asked afanctl for the understood v1 schema"
+
+# 22e. far-older-unsupported: below the plugin minimum, refused with the fix.
+setup_case "$FIX/state-hold.json"
+out="$(run_schema v0-older observe status --json 2>/dev/null)"; rc=$?
+assert_eq 0 "$rc" "status still renders a document for an older daemon (R6)"
+assert_contains "$(jget "$out" '.warnings | join(" ")')" "older" \
+    "the document carries the older-schema notice"
+assert_contains "$(jget "$out" '.warnings | join(" ")')" "afanctl.status.v0" \
+    "the notice names the schema seen"
+assert_contains "$(jget "$out" '.warnings | join(" ")')" "update afanctl" \
+    "the notice names the fix"
+assert_exit_code 1 run_schema v0-older observe preset med
+assert_eq "0" "$(test -e "$RUN/argv.log" && echo 1 || echo 0)" \
+    "an older-schema write is refused before it runs"
+
+# 22e-bis. the highest mutual version wins even when the *emitted* one is older:
+# an older default that still advertises v1 is recovered by the same re-request.
+setup_case "$FIX/state-hold.json"
+out="$(run_schema v0-compat observe status --json 2>/dev/null)"; rc=$?
+assert_eq 0 "$rc" "an older default advertising v1 exits 0"
+assert_eq "1200" "$(jget "$out" '.hardware.fan_min_rpm')" \
+    "the v1 band is recovered from the older default"
+assert_eq "0" "$(jget "$out" '[.warnings[] | select(test("older"))] | length')" \
+    "recovering v1 raises no older warning"
+assert_contains "$(cat -- "$RUN/status-argv.log" 2>/dev/null)" "afanctl.status.v1" \
+    "the CLI asked for the mutual v1 schema"
+
+# 22f. missing / malformed schema fields are refusals naming what was seen.
+setup_case "$FIX/state-hold.json"
+out="$(run_schema missing observe status --json 2>/dev/null)"; rc=$?
+assert_eq 0 "$rc" "a missing schema still renders the plugin document"
+assert_contains "$(jget "$out" '.warnings | join(" ")')" "schema" \
+    "a missing schema is reported"
+setup_case "$FIX/state-hold.json"
+out="$(run_schema malformed observe status --json 2>/dev/null)"; rc=$?
+assert_contains "$(jget "$out" '.warnings | join(" ")')" "afanctl.status" \
+    "a malformed schema names what was seen"
+assert_exit_code 1 run_schema malformed observe preset med
+
+# 22g. a newer afanctl.state.v* degrades instead of failing every read/write.
+setup_case "$FIX/state-hold.json"
+seed_state '.schema = "afanctl.state.v2" | .future = {unknown: true}'
+out="$(run_mode hold status --json 2>/dev/null)"; rc=$?
+assert_eq 0 "$rc" "a newer state schema still renders status"
+assert_eq "true" "$(jget "$out" '.daemon.running')" "the daemon is still reported running"
+assert_eq "hold" "$(jget "$out" '.daemon.mode')" "recognised state fields still render"
+assert_contains "$(jget "$out" '.warnings | join(" ")')" "afanctl.state.v2" \
+    "the state notice names the schema seen"
+assert_exit_code 0 run_mode hold preset med
+
+# a far-older state schema is refused, not silently rendered.
+setup_case "$FIX/state-hold.json"
+seed_state '.schema = "afanctl.state.v0"'
+out="$(run_mode hold status --json 2>/dev/null)"; rc=$?
+assert_eq 1 "$rc" "an older state schema is refused"
+assert_contains "$(jget "$out" '.message')" "update afanctl" \
+    "the state refusal names the fix"
+assert_exit_code 1 run_mode hold preset med
 
 # ---------------------------------------------------------------------------
 # Scratch reaping. tmpfile() is only ever called inside a command substitution,

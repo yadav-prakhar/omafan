@@ -39,6 +39,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Schema negotiation instead of string equality (ruling R14, issue #4). omafan
+  now matches afanctl's `status` and `state` schemas by family and version
+  (`<family>.v<major>`) rather than by an exact string. A newer daemon schema
+  degrades gracefully — recognised fields render and a single `warnings[]`
+  notice says the daemon is newer than the plugin — while an older, missing or
+  malformed one is refused naming the fix; a newer daemon that still advertises
+  a version omafan understands is re-asked for it (`status --json --schema`).
+  This is what unblocks afanctl's contract v2 without breaking installed
+  plugins. `omafan.status.v1` is emitted unchanged, and the change adds two pure
+  helpers to `Model.js` (`parseSchemaId`, `selectSchema`). Guarded by
+  `tests/model.test.mjs` and `tests/ctl.test.sh`; `fake-afanctl` gained a
+  `FAKE_AFANCTL_SCHEMA` switch and `--schema`.
 - `tests/branch-model.test.sh`, the gate's 9th suite: it reads the tree of
   `master` (or `origin/master`) and fails naming every denylisted development
   path it finds. With no such ref in the clone it prints a visible `SKIPPED`

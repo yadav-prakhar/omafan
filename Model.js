@@ -19,6 +19,97 @@ var PRESET_LABELS = {
 
 var STATUS_SCHEMA = "omafan.status.v1";
 
+// Schema negotiation (omafan#4). A schema id is "<family>.v<major>". Each side
+// declares what it can emit/understand and the highest version both understand
+// is used. An unknown NEWER version is tolerated — the recognised fields still
+// render, with one quiet notice — while an unknown OLDER version is refused.
+// These helpers are pure and ES5-only so the Node harness exercises the whole
+// matrix with no QML and no daemon; bin/omafan-ctl mirrors the same rule in one
+// bash helper because it cannot import this file (as the preset ladder is).
+var OMAFAN_STATUS_FAMILY = "omafan.status";
+var OMAFAN_STATUS_SUPPORTED = [STATUS_SCHEMA];
+
+// parseSchemaId("afanctl.status.v2") -> {family:"afanctl.status",version:2},
+// or null for anything that is not exactly "<family>.v<digits>".
+function parseSchemaId(id) {
+  if (typeof id !== "string") return null;
+  var match = /^(.+)\.v([0-9]+)$/.exec(id);
+  if (!match) return null;
+  var family = match[1];
+  var version = Number(match[2]);
+  if (!family || !isFinite(version)) return null;
+  return { family: family, version: version };
+}
+
+// Coerce a schema list into an array of strings; a bare string is one id.
+function schemaIds(value) {
+  if (typeof value === "string") return [value];
+  if (value && typeof value.length === "number") {
+    var out = [];
+    for (var i = 0; i < value.length; i++) {
+      if (typeof value[i] === "string") out.push(value[i]);
+    }
+    return out;
+  }
+  return [];
+}
+
+function schemaHasVersion(list, family, version) {
+  for (var i = 0; i < list.length; i++) {
+    var parsed = parseSchemaId(list[i]);
+    if (parsed && parsed.family === family && parsed.version === version) return true;
+  }
+  return false;
+}
+
+// selectSchema(family, advertised, supported) -> {status, schema, version}:
+//   match    the highest version present in both lists
+//   newer    no mutual version and the highest advertised is not below the
+//            supported minimum (an unknown newer version: safe to degrade)
+//   older    no mutual version and the highest advertised is below the minimum
+//   unknown  nothing parseable in this family (missing or malformed schema)
+function selectSchema(family, advertised, supported) {
+  var ads = schemaIds(advertised);
+  var sups = schemaIds(supported);
+  var i, parsed;
+  var adVersion = null, adId = null;
+  var supMin = null;
+  var matchVersion = null, matchId = null;
+  for (i = 0; i < ads.length; i++) {
+    parsed = parseSchemaId(ads[i]);
+    if (!parsed || parsed.family !== family) continue;
+    if (adVersion === null || parsed.version > adVersion) {
+      adVersion = parsed.version;
+      adId = ads[i];
+    }
+  }
+  for (i = 0; i < sups.length; i++) {
+    parsed = parseSchemaId(sups[i]);
+    if (!parsed || parsed.family !== family) continue;
+    if (supMin === null || parsed.version < supMin) supMin = parsed.version;
+  }
+  if (adVersion === null || supMin === null) {
+    return { status: "unknown", schema: null, version: null };
+  }
+  for (i = 0; i < ads.length; i++) {
+    parsed = parseSchemaId(ads[i]);
+    if (!parsed || parsed.family !== family) continue;
+    if (schemaHasVersion(sups, family, parsed.version)) {
+      if (matchVersion === null || parsed.version > matchVersion) {
+        matchVersion = parsed.version;
+        matchId = ads[i];
+      }
+    }
+  }
+  if (matchVersion !== null) {
+    return { status: "match", schema: matchId, version: matchVersion };
+  }
+  if (adVersion < supMin) {
+    return { status: "older", schema: adId, version: adVersion };
+  }
+  return { status: "newer", schema: adId, version: adVersion };
+}
+
 // DESIGN.md §4.1 defines staleness as "exceeds max(5 s, 3 x poll interval)".
 // This function receives only the age, so it applies the documented 5 s floor;
 // a caller that knows its poll interval may choose a larger threshold.
@@ -211,10 +302,42 @@ function parseStatus(text) {
   if (!parsed || typeof parsed !== "object" || typeof parsed.length === "number") {
     return { ok: false, error: "status output is not a JSON object" };
   }
-  if (parsed.schema !== STATUS_SCHEMA) {
+  // The panel has no request channel, so the *emitted* schema governs: a newer
+  // document is rendered with a notice even if it also advertises a version
+  // this plugin understands (there is nothing to re-request from here).
+  var picked = selectSchema(OMAFAN_STATUS_FAMILY, [parsed.schema], OMAFAN_STATUS_SUPPORTED);
+  if (picked.status === "unknown") {
     return { ok: false, error: "unexpected status schema: " + String(parsed.schema) };
   }
+  if (picked.status === "older") {
+    return { ok: false, error: "status schema " + String(parsed.schema) +
+      " is older than this plugin supports (" + OMAFAN_STATUS_SUPPORTED[0] +
+      " required); update omafan" };
+  }
+  if (picked.status === "newer") {
+    // The daemon is working, only some fields are unreadable: render what is
+    // recognised and say so once, never a blank panel and never a hard error.
+    return { ok: true, status: parsed,
+      notice: "status schema " + picked.schema + " is newer than this plugin understands (" +
+        OMAFAN_STATUS_SUPPORTED[0] + "); some fields may be missing. Fix: update the omafan plugin" };
+  }
   return { ok: true, status: parsed };
+}
+
+// The single quiet notice for a schema the plugin does not fully understand:
+// the first warnings[] entry that names a schema, or null. The CLI records the
+// afanctl-schema notice there; the panel renders this one line, never a blank
+// panel and never a hard error (omafan#4).
+function statusNotice(status) {
+  if (!status || status.ok === false) return null;
+  var warnings = status.warnings;
+  if (!warnings || !warnings.length) return null;
+  for (var i = 0; i < warnings.length; i++) {
+    if (typeof warnings[i] === "string" && warnings[i].indexOf("schema") !== -1) {
+      return warnings[i];
+    }
+  }
+  return null;
 }
 
 function progressFraction(status) {

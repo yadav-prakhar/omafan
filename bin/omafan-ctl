@@ -35,6 +35,19 @@ readonly PRESETS_SCHEMA="omafan.presets.v1"
 readonly ACTION_SCHEMA="omafan.action.v1"
 readonly DOCTOR_SCHEMA="omafan.doctor.v1"
 readonly STATE_SCHEMA="afanctl.state.v1"
+# Schema negotiation (omafan#4). The plugin understands afanctl.status.v1 and
+# afanctl.state.v1. A newer daemon schema degrades with a warning; an older one
+# is refused. Model.js holds the canonical pure rule (parseSchemaId,
+# selectSchema) and tests/model.test.mjs pins it; the two helpers below mirror
+# it for the CLI, which cannot import Model.js (as the preset ladder does).
+readonly AFANCTL_STATUS_FAMILY="afanctl.status"
+readonly AFANCTL_STATUS_MIN=1
+readonly AFANCTL_STATUS_MAX=1
+readonly AFANCTL_STATUS_UNDERSTOOD="afanctl.status.v1"
+readonly AFANCTL_STATUS_SUPPORTED_JSON='["afanctl.status.v1"]'
+readonly AFANCTL_STATE_FAMILY="afanctl.state"
+readonly AFANCTL_STATE_MIN=1
+readonly AFANCTL_STATE_MAX=1
 readonly STATE_FAN_MAX_INPUT=100000
 # Staleness of state.json is max(5 s, 3 x poll interval). The poll interval is
 # not in state.json and the daemon default is 1 s, so the 5 s floor wins.
@@ -173,6 +186,12 @@ msg_limits_unavailable() {
 }
 
 add_warning() {
+    # Idempotent: the same notice can be raised by more than one query in a
+    # single run (e.g. load_limits and --full both negotiate the schema), and
+    # the contract says one quiet notice, not a growing list.
+    if printf '%s' "$warnings_json" | jq -e --arg w "$1" 'index($w) != null' >/dev/null 2>&1; then
+        return 0
+    fi
     warnings_json="$(printf '%s' "$warnings_json" | jq -c --arg w "$1" '. + [$w]')"
 }
 
@@ -258,25 +277,106 @@ afanctl_version() {
     esac
 }
 
-# Run `$afanctl status --json` directly (a read; never pkexec). Prints the
-# document on stdout; afanctl's stderr is never swallowed; wrong schema or a
-# failed run returns non-zero with stderr already on our stderr.
+# Run `$afanctl status --json` directly (a read; never pkexec), negotiate the
+# schema, and set $queried_status to the accepted document. Returns 0 on
+# success. On a schema it cannot use it prints the refusal to stderr, records a
+# warning and returns 1. It deliberately does not print the document on stdout:
+# callers read $queried_status, so the warning lands in the caller's
+# warnings_json instead of a command-substitution subshell that drops it.
+queried_status=""
+
+# schema_parse <id> - print "<family> <version>" for a well-formed
+# "<family>.v<digits>" id, or nothing (rc 1) for anything else.
+schema_parse() {
+    local id="${1:-}" family ver
+    case "$id" in
+        *".v"*)
+            family="${id%.v*}"
+            ver="${id##*.v}"
+            case "$family" in '' | *[!A-Za-z0-9._-]*) return 1 ;; esac
+            case "$ver" in '' | *[!0-9]*) return 1 ;; esac
+            printf '%s %s\n' "$family" "$ver"
+            return 0 ;;
+    esac
+    return 1
+}
+
+# schema_check <family> <min> <max> <id> - print match|newer|older|unknown and
+# return 0 for match/newer, 1 for older/unknown. The one comparison the CLI
+# uses, for both the status document and state.json.
+schema_check() {
+    local family="$1" min="$2" max="$3" id="${4:-}" parsed f v
+    if ! parsed="$(schema_parse "$id")"; then printf 'unknown\n'; return 1; fi
+    f="${parsed%% *}"
+    v="${parsed##* }"
+    if [ "$f" != "$family" ]; then printf 'unknown\n'; return 1; fi
+    if [ "$v" -lt "$min" ]; then printf 'older\n'; return 1; fi
+    if [ "$v" -gt "$max" ]; then printf 'newer\n'; return 0; fi
+    printf 'match\n'
+    return 0
+}
+
 query_afanctl_status() {
-    local out rc err
+    local out rc err schema class mutual
+    queried_status=""
     err="$(tmpfile)"
     rc="0"
-    out="$(env "${ac_env[@]}" "$afanctl_resolved" \
+    # Bounded: a wedged daemon must not hang the caller (the panel's own
+    # process deadline is 20 s; this read gets PROBE_TIMEOUT_S).
+    out="$("$TIMEOUT_BIN" "$PROBE_TIMEOUT_S" env "${ac_env[@]}" "$afanctl_resolved" \
         ${ac_args[@]+"${ac_args[@]}"} status --json 2>"$err")" || rc="$?"
     if [ "$rc" -ne 0 ]; then
         cat -- "$err" >&2
         return "$rc"
     fi
     cat -- "$err" >&2
-    if ! printf '%s' "$out" | jq -e '.schema == "afanctl.status.v1"' >/dev/null 2>&1; then
-        printf 'omafan-ctl: afanctl status did not emit afanctl.status.v1 JSON\n' >&2
-        return 1
+
+    schema="$(printf '%s' "$out" | jq -r '.schema // empty' 2>/dev/null || true)"
+    class="$(schema_check "$AFANCTL_STATUS_FAMILY" "$AFANCTL_STATUS_MIN" \
+        "$AFANCTL_STATUS_MAX" "$schema")" || true
+    # Highest mutually understood version the daemon advertises. When it is not
+    # the emitted one, ask for it explicitly: a newer daemon that keeps v1
+    # compatibility answers with v1, and an older default that advertises a
+    # newer supported version is recovered the same way. The supported list is
+    # ordered ascending, so the last advertised understood id is the highest
+    # mutual. A failed re-request falls back to the emitted document.
+    mutual="$(printf '%s' "$out" | jq -r --argjson u "$AFANCTL_STATUS_SUPPORTED_JSON" \
+        '(.schema_supported // []) as $s
+         | [$u[] | select(. as $x | $s | index($x))] | last // empty' \
+        2>/dev/null || true)"
+    if [ -n "$mutual" ] && [ "$mutual" != "$schema" ]; then
+        local re_out re_rc re_err
+        re_err="$(tmpfile)"
+        re_rc="0"
+        re_out="$("$TIMEOUT_BIN" "$PROBE_TIMEOUT_S" env "${ac_env[@]}" "$afanctl_resolved" \
+            ${ac_args[@]+"${ac_args[@]}"} status --json --schema "$mutual" 2>"$re_err")" || re_rc="$?"
+        if [ "$re_rc" -eq 0 ] \
+                && printf '%s' "$re_out" | jq -e --arg s "$mutual" '.schema == $s' >/dev/null 2>&1; then
+            out="$re_out"
+            schema="$mutual"
+            class="match"
+        else
+            cat -- "$re_err" >&2
+        fi
     fi
-    printf '%s\n' "$out"
+    case "$class" in
+        match) ;;
+        newer)
+            add_warning "afanctl reports schema $schema, newer than this plugin understands ($AFANCTL_STATUS_UNDERSTOOD); some fields may be missing. Fix: update the omafan plugin"
+            ;;
+        older)
+            add_warning "afanctl status schema $schema is older than this plugin supports ($AFANCTL_STATUS_UNDERSTOOD required). Fix: update afanctl"
+            printf 'omafan-ctl: afanctl status schema %s is older than this plugin supports (%s required). Fix: update afanctl\n' \
+                "$schema" "$AFANCTL_STATUS_UNDERSTOOD" >&2
+            return 1 ;;
+        *)
+            add_warning "afanctl status did not emit an afanctl.status.v* schema (saw: ${schema:-<missing>})"
+            printf 'omafan-ctl: afanctl status did not emit an afanctl.status.v* schema (saw: %s)\n' \
+                "${schema:-<missing>}" >&2
+            return 1 ;;
+    esac
+    queried_status="$out"
+    return 0
 }
 
 # Read <runtime-dir>/state.json. On success sets the ST_* globals and returns
@@ -298,14 +398,29 @@ ST_RECENT_ERRORS="[]"
 
 read_state() {
     local state_file="$runtime_dir/state.json"
-    local parsed now mtime age
+    local parsed now mtime age schema class
     if [ ! -r "$state_file" ]; then
         return 1
     fi
-    if ! parsed="$(jq -e --arg schema "$STATE_SCHEMA" \
-            'select(.schema == $schema)' -- "$state_file" 2>/dev/null)"; then
+    # Negotiate the state schema (omafan#4): a newer afanctl.state.v* degrades
+    # with a warning, an older/unknown one is refused, exactly as for status.
+    schema="$(jq -r '.schema // empty' -- "$state_file" 2>/dev/null || true)"
+    class="$(schema_check "$AFANCTL_STATE_FAMILY" "$AFANCTL_STATE_MIN" \
+        "$AFANCTL_STATE_MAX" "$schema")" || true
+    case "$class" in
+        match) ;;
+        newer)
+            add_warning "afanctl state schema $schema is newer than this plugin understands ($STATE_SCHEMA); some fields may be missing. Fix: update the omafan plugin" ;;
+        older)
+            fail 1 unparsable "$ACTION_SCHEMA" \
+                "state.json schema $schema is older than this plugin supports ($STATE_SCHEMA required). Fix: update afanctl" ;;
+        *)
+            fail 1 unparsable "$ACTION_SCHEMA" \
+                "state.json at $runtime_dir is not the documented $STATE_SCHEMA JSON (saw: ${schema:-<missing>}). $FIX_RESTART_AC" ;;
+    esac
+    if ! parsed="$(jq -c '.' -- "$state_file" 2>/dev/null)"; then
         fail 1 unparsable "$ACTION_SCHEMA" \
-            "state.json at $runtime_dir is not the documented $STATE_SCHEMA JSON. $FIX_RESTART_AC"
+            "state.json at $runtime_dir is not readable JSON. $FIX_RESTART_AC"
     fi
     ST_PRESENT="true"
     ST_STATE="$parsed"
@@ -425,7 +540,7 @@ load_limits() {
         fi
         return 1
     fi
-    if ! status_json="$(query_afanctl_status)"; then
+    if ! query_afanctl_status; then
         if [ -n "$min" ]; then
             hw_min="$min" hw_max="$max" cached_interval="$interval"
             add_warning "afanctl status failed; using the stale hardware limits cache"
@@ -433,6 +548,7 @@ load_limits() {
         fi
         return 1
     fi
+    status_json="$queried_status"
     min="$(printf '%s' "$status_json" | jq -r '.fan.min_rpm // empty')"
     max="$(printf '%s' "$status_json" | jq -r '.fan.max_rpm // empty')"
     interval="$(printf '%s' "$status_json" | jq -r '.config.interval_s // empty')"
@@ -792,7 +908,8 @@ run_status() {
     fi
 
     if [ "$want_full" = "true" ]; then
-        if full_json="$(query_afanctl_status)"; then
+        if query_afanctl_status; then
+            full_json="$queried_status"
             sensors_json="$(printf '%s' "$full_json" | jq -c '.sensors // []')"
             t_eff="$(printf '%s' "$full_json" | jq -c '.effective.temp_c // null')"
             full_uptime="$(printf '%s' "$full_json" | jq -c '.daemon.uptime_s // null')"
@@ -1037,18 +1154,30 @@ run_doctor() {
         add_check pkexec_write_path WARN \
             "afanctl is missing, so the write-path probe could not run; fix afanctl first"
     else
-        local probe_rc=0 probe_out="" probe_ms_start probe_ms
+        local probe_rc=0 probe_out="" probe_ms_start probe_ms probe_schema="" probe_ok="false"
         probe_ms_start="$(date +%s%3N)"
         probe_out="$("$TIMEOUT_BIN" "$PROBE_TIMEOUT_S" "$pkexec_resolved" \
             "$ac_path" status --json 2>/dev/null)" || probe_rc="$?"
         probe_ms=$(( $(date +%s%3N) - probe_ms_start ))
-        if [ "$probe_rc" -eq 0 ] \
-                && printf '%s' "$probe_out" | jq -e '.schema == "afanctl.status.v1"' >/dev/null 2>&1; then
+        # The same negotiation rule as the status read (R14): a schema this
+        # plugin understands or a newer one both prove the write path works;
+        # an older/unknown one does not.
+        if [ "$probe_rc" -eq 0 ]; then
+            probe_schema="$(printf '%s' "$probe_out" | jq -r '.schema // empty' 2>/dev/null || true)"
+            if schema_check "$AFANCTL_STATUS_FAMILY" "$AFANCTL_STATUS_MIN" \
+                    "$AFANCTL_STATUS_MAX" "$probe_schema" >/dev/null 2>&1; then
+                probe_ok="true"
+            fi
+        fi
+        if [ "$probe_ok" = "true" ]; then
             add_check pkexec_write_path PASS \
                 "polkit authorises /usr/bin/afanctl status --json in ${probe_ms} ms"
         elif [ "$probe_rc" -eq 124 ]; then
             add_check pkexec_write_path FAIL \
                 "pkexec did not answer within ${PROBE_TIMEOUT_S}s - it is prompting for a password, so writes will hang; check the polkit rule and that the session is local and active"
+        elif [ "$probe_rc" -eq 0 ]; then
+            add_check pkexec_write_path FAIL \
+                "afanctl status through pkexec returned an unsupported schema (saw: ${probe_schema:-<missing>}), so the write path could not be confirmed; fix: update afanctl or the omafan plugin"
         else
             add_check pkexec_write_path FAIL \
                 "afanctl status through pkexec exited rc=$probe_rc, so privileged writes are not authorised; fix: check the polkit rule and that the session is local and active"

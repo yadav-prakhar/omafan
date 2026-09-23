@@ -58,6 +58,8 @@ writes to the fan.
 | `omafan-keybindings install` exits 1 | a chord is already bound | read the named conflict; see §9 |
 | No desktop notifications | `notify-send` missing | install `libnotify` (never changes exit codes) |
 | `warnings: hardware limits cache not writable` | runtime dir not writable | none required; it degrades to querying afanctl |
+| `warnings: afanctl reports schema … newer …` | afanctl is newer than the plugin understands | update the omafan plugin; the recognised fields still render |
+| `warnings: afanctl status schema … older …` | afanctl is older than the plugin supports | update afanctl; writes are refused (exit 1) until then |
 
 ## 3. The plugin does not install or does not appear
 
